@@ -23,7 +23,16 @@ func handleMap(client *http.Client, upstream string, cache *Cache) http.HandlerF
 
 		// Cache 2xx and 3xx (redirects) as successful responses.
 		if resp.StatusCode >= 200 && resp.StatusCode < 400 {
-			body, _ := io.ReadAll(resp.Body)
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				if entry, ok := cache.Get(key); ok {
+					writeFromCache(w, entry)
+					return
+				}
+				w.Header().Set("X-Cache", "MISS")
+				http.Error(w, "bad gateway", http.StatusBadGateway)
+				return
+			}
 			cache.Set(key, &cacheEntry{
 				statusCode: resp.StatusCode,
 				header:     resp.Header.Clone(),

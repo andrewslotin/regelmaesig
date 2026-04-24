@@ -18,7 +18,11 @@ func handleShape(client *http.Client, upstream string, cache *Cache) http.Handle
 
 		// Shapes return redirects (3xx); treat 2xx and 3xx as cacheable success.
 		if resp.StatusCode >= 200 && resp.StatusCode < 400 {
-			body, _ := io.ReadAll(resp.Body)
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				serveFallback(w, cache, key, `{}`)
+				return
+			}
 			cache.Set(key, &cacheEntry{
 				statusCode: resp.StatusCode,
 				header:     resp.Header.Clone(),
