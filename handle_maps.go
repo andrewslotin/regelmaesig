@@ -3,14 +3,19 @@ package main
 import (
 	"io"
 	"net/http"
+	"strconv"
+	"time"
 )
 
-func handleMap(client *http.Client, upstream string, cache *Cache) http.HandlerFunc {
+func handleMap(client *http.Client, upstream string, cache *Cache, metrics *Metrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key := r.URL.RequestURI()
+		path := routePath(r)
 
+		start := time.Now()
 		resp, err := forward(client, upstream, r)
 		if err != nil {
+			metrics.UpstreamErrorsTotal.WithLabelValues(r.Method, path, errorReason(err)).Inc()
 			if entry, ok := cache.Get(key); ok {
 				writeFromCache(w, entry)
 				return
@@ -20,6 +25,10 @@ func handleMap(client *http.Client, upstream string, cache *Cache) http.HandlerF
 			return
 		}
 		defer resp.Body.Close() //nolint:errcheck
+
+		duration := time.Since(start)
+		metrics.UpstreamRequestDuration.WithLabelValues(r.Method, path).Observe(duration.Seconds())
+		metrics.UpstreamRequestsTotal.WithLabelValues(r.Method, path, strconv.Itoa(resp.StatusCode)).Inc()
 
 		// Cache 2xx and 3xx (redirects) as successful responses.
 		if resp.StatusCode >= 200 && resp.StatusCode < 400 {
@@ -49,6 +58,7 @@ func handleMap(client *http.Client, upstream string, cache *Cache) http.HandlerF
 		}
 
 		// Non-2xx/3xx: serve from cache if available, otherwise pass through.
+		metrics.UpstreamErrorsTotal.WithLabelValues(r.Method, path, httpErrorReason(resp.StatusCode)).Inc()
 		if entry, ok := cache.Get(key); ok {
 			writeFromCache(w, entry)
 			return
@@ -56,4 +66,3 @@ func handleMap(client *http.Client, upstream string, cache *Cache) http.HandlerF
 		copyUpstreamResponse(w, resp)
 	}
 }
-
