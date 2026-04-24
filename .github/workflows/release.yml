@@ -48,12 +48,17 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
 
       - name: Export digest
-        run: echo "${{ steps.build.outputs.digest }}" > /tmp/digest.txt
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
 
       - uses: actions/upload-artifact@v4
         with:
           name: digest-${{ matrix.runner }}
-          path: /tmp/digest.txt
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
 
   merge:
     runs-on: ubuntu-latest
@@ -81,10 +86,12 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: /tmp/digests
+          pattern: digest-*
           merge-multiple: true
 
       - name: Create and push manifest
+        working-directory: /tmp/digests
         run: |
-          DIGESTS=$(cat /tmp/digests/digest-*.txt | sed 's|^|${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@|' | tr '\n' ' ')
-          TAGS=$(echo "${{ steps.meta.outputs.tags }}" | sed 's|^|-t |' | tr '\n' ' ')
-          docker buildx imagetools create $TAGS $DIGESTS
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@sha256:%s ' *)
