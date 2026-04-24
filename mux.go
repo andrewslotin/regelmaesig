@@ -31,8 +31,8 @@ func newMux(upstreamURL string, timeout time.Duration, staticCap, dynamicCap int
 	mux.HandleFunc("GET /journeys/{ref}", handleRefreshJourney(client, upstreamURL, dynamicCache))
 	mux.HandleFunc("GET /journeys", handleJourneys(client, upstreamURL, dynamicCache))
 
-	mux.HandleFunc("GET /trips/{id}", handleTrip(client, upstreamURL))
-	mux.HandleFunc("GET /trips", handleTrips(client, upstreamURL))
+	mux.HandleFunc("GET /trips/{id}", handleTrip(client, upstreamURL, dynamicCache))
+	mux.HandleFunc("GET /trips", handleTrips(client, upstreamURL, dynamicCache))
 
 	mux.HandleFunc("GET /locations/nearby", handleNearby(client, upstreamURL))
 	mux.HandleFunc("GET /locations", handleLocations(client, upstreamURL))
