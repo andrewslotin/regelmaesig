@@ -7,13 +7,20 @@ import (
 
 // newMux creates an http.ServeMux with all routes registered.
 // upstreamURL and timeout are injected so tests can use a local server.
-func newMux(upstreamURL string, timeout time.Duration) *http.ServeMux {
+// staticCap and dynamicCap control the LRU capacity for each cache tier;
+// 0 disables that tier.
+func newMux(upstreamURL string, timeout time.Duration, staticCap, dynamicCap int) *http.ServeMux {
 	client := &http.Client{
 		Timeout: timeout,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
+
+	staticCache := NewCache(staticCap)   //nolint:ineffassign,wastedassign
+	dynamicCache := NewCache(dynamicCap) //nolint:ineffassign,wastedassign
+	_ = staticCache
+	_ = dynamicCache
 
 	mux := http.NewServeMux()
 

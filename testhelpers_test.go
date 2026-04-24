@@ -10,7 +10,7 @@ import (
 // Returns the proxy server URL and a cleanup func.
 func newTestStack(upstreamHandler http.Handler, timeout time.Duration) (srvURL string, cleanup func()) {
 	upstream := httptest.NewServer(upstreamHandler)
-	mux := newMux(upstream.URL, timeout)
+	mux := newMux(upstream.URL, timeout, 0, 0)
 	srv := httptest.NewServer(mux)
 	return srv.URL, func() {
 		srv.Close()
@@ -23,7 +23,7 @@ func newUnreachableStack(timeout time.Duration) (srvURL string, cleanup func()) 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	upstreamURL := upstream.URL
 	upstream.Close()
-	mux := newMux(upstreamURL, timeout)
+	mux := newMux(upstreamURL, timeout, 0, 0)
 	srv := httptest.NewServer(mux)
 	return srv.URL, srv.Close
 }
