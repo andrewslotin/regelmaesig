@@ -160,3 +160,73 @@ func TestStation_Timeout(t *testing.T) {
 		t.Errorf("unexpected body: %s", body)
 	}
 }
+
+func TestStations_CacheHit(t *testing.T) {
+	data := `{"900000100001":{"id":"900000100001"}}`
+	srvURL, cleanup := newCachedTestStack(respondOnce(data), 5*time.Second, 10, 0)
+	defer cleanup()
+
+	resp, _ := http.Get(srvURL + "/stations?query=Zoo")
+	io.ReadAll(resp.Body) //nolint:errcheck
+	resp.Body.Close()    //nolint:errcheck
+
+	resp, err := http.Get(srvURL + "/stations?query=Zoo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if got := resp.Header.Get("X-Cache"); got != "HIT" {
+		t.Errorf("expected X-Cache: HIT, got %q", got)
+	}
+}
+
+func TestStations_CacheMiss(t *testing.T) {
+	srvURL, cleanup := newCachedTestStack(respondWith(http.StatusServiceUnavailable, ``), 5*time.Second, 10, 0)
+	defer cleanup()
+
+	resp, err := http.Get(srvURL + "/stations?query=Zoo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if got := resp.Header.Get("X-Cache"); got != "MISS" {
+		t.Errorf("expected X-Cache: MISS, got %q", got)
+	}
+}
+
+func TestStation_CacheHit(t *testing.T) {
+	data := `{"id":"900000100001","name":"S+U Zoologischer Garten"}`
+	srvURL, cleanup := newCachedTestStack(respondOnce(data), 5*time.Second, 10, 0)
+	defer cleanup()
+
+	resp, _ := http.Get(srvURL + "/stations/900000100001")
+	io.ReadAll(resp.Body) //nolint:errcheck
+	resp.Body.Close()    //nolint:errcheck
+
+	resp, err := http.Get(srvURL + "/stations/900000100001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if got := resp.Header.Get("X-Cache"); got != "HIT" {
+		t.Errorf("expected X-Cache: HIT, got %q", got)
+	}
+}
+
+func TestStation_CacheMiss(t *testing.T) {
+	srvURL, cleanup := newCachedTestStack(respondWith(http.StatusServiceUnavailable, ``), 5*time.Second, 10, 0)
+	defer cleanup()
+
+	resp, err := http.Get(srvURL + "/stations/900000100001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if got := resp.Header.Get("X-Cache"); got != "MISS" {
+		t.Errorf("expected X-Cache: MISS, got %q", got)
+	}
+}
