@@ -55,6 +55,31 @@ func newCachedTestStack(upstreamHandler http.Handler, timeout time.Duration, sta
 	}
 }
 
+// noRedirectClient is an http.Client that does not follow redirects, for testing redirect caching.
+var noRedirectClient = &http.Client{
+	CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
+
+// respondRedirectOnce serves a redirect on the first call; subsequent calls return 503.
+func respondRedirectOnce(status int, location string) http.HandlerFunc {
+	var mu sync.Mutex
+	served := false
+	return func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		first := !served
+		served = true
+		mu.Unlock()
+		if first {
+			w.Header().Set("Location", location)
+			w.WriteHeader(status)
+			return
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}
+}
+
 // respondOnce serves a successful response on the first call; subsequent calls return 503.
 func respondOnce(body string) http.HandlerFunc {
 	var mu sync.Mutex
