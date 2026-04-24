@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"net/http"
+	"time"
 )
 
 // forward builds an upstream request from r, executes it with client, and returns the response.
@@ -34,4 +35,74 @@ func writeEmptyJSON(w http.ResponseWriter, body string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	io.WriteString(w, body) //nolint:errcheck
+}
+
+// newStandardHandler returns a handler that forwards to upstream, caches successful responses,
+// and falls back to a cached response (or empty JSON with X-Cache: MISS) on failure.
+//
+// When expiry is nil the response is cached indefinitely (static routes).
+// When expiry is non-nil it is called with the buffered body; a zero return means "do not cache"
+// (e.g. an empty-array response).
+func newStandardHandler(client *http.Client, upstream, emptyBody string, cache *Cache, expiry func([]byte) time.Time) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		key := r.URL.RequestURI()
+
+		resp, err := forward(client, upstream, r)
+		if err != nil {
+			serveFallback(w, cache, key, emptyBody)
+			return
+		}
+		defer resp.Body.Close() //nolint:errcheck
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			serveFallback(w, cache, key, emptyBody)
+			return
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			serveFallback(w, cache, key, emptyBody)
+			return
+		}
+
+		var expiresAt time.Time
+		if expiry != nil {
+			expiresAt = expiry(body)
+		}
+		// Cache when: static route (expiry==nil), or dynamic with a future expiry time.
+		if expiry == nil || (!expiresAt.IsZero() && expiresAt.After(time.Now())) {
+			cache.Set(key, &cacheEntry{
+				statusCode: resp.StatusCode,
+				header:     resp.Header.Clone(),
+				body:       body,
+				expiresAt:  expiresAt,
+			})
+		}
+
+		for k, vs := range resp.Header {
+			for _, v := range vs {
+				w.Header().Add(k, v)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		w.Write(body) //nolint:errcheck
+	}
+}
+
+// serveFallback writes a cached response with X-Cache: HIT, or the empty JSON fallback
+// with X-Cache: MISS when no cached entry is available.
+func serveFallback(w http.ResponseWriter, cache *Cache, key, emptyBody string) {
+	if entry, ok := cache.Get(key); ok {
+		w.Header().Set("X-Cache", "HIT")
+		for k, vs := range entry.header {
+			for _, v := range vs {
+				w.Header().Add(k, v)
+			}
+		}
+		w.WriteHeader(entry.statusCode)
+		w.Write(entry.body) //nolint:errcheck
+		return
+	}
+	w.Header().Set("X-Cache", "MISS")
+	writeEmptyJSON(w, emptyBody)
 }

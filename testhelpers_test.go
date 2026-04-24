@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"time"
 )
 
@@ -40,5 +41,35 @@ func respondSlow(delay time.Duration) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(delay)
 		w.WriteHeader(http.StatusOK)
+	}
+}
+
+// newCachedTestStack is like newTestStack but with caches enabled.
+func newCachedTestStack(upstreamHandler http.Handler, timeout time.Duration, staticCap, dynamicCap int) (srvURL string, cleanup func()) {
+	upstream := httptest.NewServer(upstreamHandler)
+	mux := newMux(upstream.URL, timeout, staticCap, dynamicCap)
+	srv := httptest.NewServer(mux)
+	return srv.URL, func() {
+		srv.Close()
+		upstream.Close()
+	}
+}
+
+// respondOnce serves a successful response on the first call; subsequent calls return 503.
+func respondOnce(body string) http.HandlerFunc {
+	var mu sync.Mutex
+	served := false
+	return func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		first := !served
+		served = true
+		mu.Unlock()
+		if first {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(body)) //nolint:errcheck
+			return
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 }

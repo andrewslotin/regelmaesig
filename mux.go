@@ -17,15 +17,14 @@ func newMux(upstreamURL string, timeout time.Duration, staticCap, dynamicCap int
 		},
 	}
 
-	staticCache := NewCache(staticCap)   //nolint:ineffassign,wastedassign
-	dynamicCache := NewCache(dynamicCap) //nolint:ineffassign,wastedassign
+	staticCache := NewCache(staticCap)
+	dynamicCache := NewCache(dynamicCap)
 	_ = staticCache
-	_ = dynamicCache
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /stops/reachable-from", handleReachableFrom(client, upstreamURL))
-	mux.HandleFunc("GET /stops/{id}/departures", handleDepartures(client, upstreamURL))
+	mux.HandleFunc("GET /stops/{id}/departures", handleDepartures(client, upstreamURL, dynamicCache))
 	mux.HandleFunc("GET /stops/{id}/arrivals", handleArrivals(client, upstreamURL))
 	mux.HandleFunc("GET /stops/{id}", handleStop(client, upstreamURL))
 
