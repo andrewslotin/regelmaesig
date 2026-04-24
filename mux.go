@@ -33,8 +33,8 @@ func newMux(upstreamURL string, timeout time.Duration, staticCap, dynamicCap int
 	mux.HandleFunc("GET /trips/{id}", handleTrip(client, upstreamURL, dynamicCache))
 	mux.HandleFunc("GET /trips", handleTrips(client, upstreamURL, dynamicCache))
 
-	mux.HandleFunc("GET /locations/nearby", handleNearby(client, upstreamURL))
-	mux.HandleFunc("GET /locations", handleLocations(client, upstreamURL))
+	mux.HandleFunc("GET /locations/nearby", handleNearby(client, upstreamURL, staticCache))
+	mux.HandleFunc("GET /locations", handleLocations(client, upstreamURL, staticCache))
 
 	mux.HandleFunc("GET /radar", handleRadar(client, upstreamURL))
 
