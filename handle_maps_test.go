@@ -93,3 +93,47 @@ func TestMap_Redirect(t *testing.T) {
 		t.Errorf("unexpected Location: %s", got)
 	}
 }
+
+func TestMap_RedirectCacheHit(t *testing.T) {
+	srvURL, cleanup := newCachedTestStack(respondRedirectOnce(http.StatusFound, "https://example.com/map.pdf"), 5*time.Second, 10, 0)
+	defer cleanup()
+
+	// First request — upstream returns 302, proxy caches and serves it.
+	resp, _ := noRedirectClient.Get(srvURL + "/maps/bvg")
+	resp.Body.Close() //nolint:errcheck
+
+	// Second request — upstream returns 503, proxy serves cached 302.
+	resp, err := noRedirectClient.Get(srvURL + "/maps/bvg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if got := resp.Header.Get("X-Cache"); got != "HIT" {
+		t.Errorf("expected X-Cache: HIT, got %q", got)
+	}
+	if resp.StatusCode != http.StatusFound {
+		t.Errorf("expected 302, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Location"); got != "https://example.com/map.pdf" {
+		t.Errorf("expected Location header, got %q", got)
+	}
+}
+
+func TestMap_NetworkErrorCacheMiss(t *testing.T) {
+	srvURL, cleanup := newUnreachableStack(5 * time.Second)
+	defer cleanup()
+
+	resp, err := http.Get(srvURL + "/maps/bvg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Errorf("expected 502, got %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("X-Cache"); got != "MISS" {
+		t.Errorf("expected X-Cache: MISS, got %q", got)
+	}
+}
