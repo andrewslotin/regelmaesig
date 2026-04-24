@@ -1,7 +1,7 @@
 FROM golang:1.26 AS builder
 
 WORKDIR /src
-COPY go.mod .
+COPY go.mod go.sum .
 COPY *.go .
 
 RUN CGO_ENABLED=0 go build -o regelmaesig .
