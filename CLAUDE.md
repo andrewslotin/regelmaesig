@@ -33,8 +33,9 @@ go test ./... -run TestName
 | File | Purpose |
 |---|---|
 | `main.go` | Config flags (`-l` listen addr, `-t` timeout), server startup |
-| `mux.go` | `newMux(upstreamURL, timeout)` — registers all routes, injectable for tests |
-| `proxy.go` | Shared helpers: `forward`, `copyUpstreamResponse`, `writeEmptyJSON` |
+| `mux.go` | `newMux(upstreamURL, timeout, staticCap, dynamicCap, metrics)` — registers all routes (including `GET /metrics`), injectable for tests |
+| `proxy.go` | Shared helpers: `forward`, `copyUpstreamResponse`, `writeEmptyJSON`, `newStandardHandler`, `newPassthroughHandler`, `serveFallback` |
+| `metrics.go` | `Metrics` struct + `NewMetrics(reg)` — four Prometheus counters/histogram; `errorReason` classifies network errors; `routePath` extracts low-cardinality path labels from `r.Pattern` |
 | `handle_<resource>.go` | One file per resource; each handler forwards to upstream or returns a typed empty response |
 | `testhelpers_test.go` | `newTestStack`, `newUnreachableStack`, `respondWith`, `respondSlow` |
 
@@ -44,6 +45,6 @@ Project memory lives at `.claude/memory/` in this repository. Read and write all
 
 ## Adding a New Endpoint
 
-1. Add a handler function in the relevant `handle_<resource>.go` (or create a new file)
-2. Register the route in `newMux()` in `mux.go`
+1. Add a handler function in the relevant `handle_<resource>.go` (or create a new file); accept `metrics *Metrics` and pass it to `newStandardHandler` (or `newPassthroughHandler` for no-cache handlers)
+2. Register the route in `newMux()` in `mux.go`, passing `metrics`
 3. Add tests in `handle_<resource>_test.go` covering: success, upstream error, network error, timeout
