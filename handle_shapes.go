@@ -3,24 +3,33 @@ package main
 import (
 	"io"
 	"net/http"
+	"strconv"
+	"time"
 )
 
-func handleShape(client *http.Client, upstream string, cache *Cache) http.HandlerFunc {
+func handleShape(client *http.Client, upstream string, cache *Cache, metrics *Metrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key := r.URL.RequestURI()
+		path := routePath(r)
 
+		start := time.Now()
 		resp, err := forward(client, upstream, r)
 		if err != nil {
-			serveFallback(w, cache, key, `{}`)
+			metrics.UpstreamErrorsTotal.WithLabelValues(r.Method, path, errorReason(err)).Inc()
+			serveFallback(w, cache, key, `{}`, metrics, r)
 			return
 		}
 		defer resp.Body.Close() //nolint:errcheck
+
+		duration := time.Since(start)
+		metrics.UpstreamRequestDuration.WithLabelValues(r.Method, path).Observe(duration.Seconds())
+		metrics.UpstreamRequestsTotal.WithLabelValues(r.Method, path, strconv.Itoa(resp.StatusCode)).Inc()
 
 		// Shapes return redirects (3xx); treat 2xx and 3xx as cacheable success.
 		if resp.StatusCode >= 200 && resp.StatusCode < 400 {
 			body, err := io.ReadAll(resp.Body)
 			if err != nil {
-				serveFallback(w, cache, key, `{}`)
+				serveFallback(w, cache, key, `{}`, metrics, r)
 				return
 			}
 			cache.Set(key, &cacheEntry{
@@ -38,6 +47,7 @@ func handleShape(client *http.Client, upstream string, cache *Cache) http.Handle
 			return
 		}
 
-		serveFallback(w, cache, key, `{}`)
+		metrics.UpstreamErrorsTotal.WithLabelValues(r.Method, path, httpErrorReason(resp.StatusCode)).Inc()
+		serveFallback(w, cache, key, `{}`, metrics, r)
 	}
 }

@@ -24,31 +24,31 @@ func newMux(upstreamURL string, timeout time.Duration, staticCap, dynamicCap int
 
 	mux.Handle("GET /metrics", metrics.Handler())
 
-	mux.HandleFunc("GET /stops/reachable-from", handleReachableFrom(client, upstreamURL, dynamicCache))
-	mux.HandleFunc("GET /stops/{id}/departures", handleDepartures(client, upstreamURL, dynamicCache))
-	mux.HandleFunc("GET /stops/{id}/arrivals", handleArrivals(client, upstreamURL, dynamicCache))
-	mux.HandleFunc("GET /stops/{id}", handleStop(client, upstreamURL, staticCache))
+	mux.HandleFunc("GET /stops/reachable-from", handleReachableFrom(client, upstreamURL, dynamicCache, metrics))
+	mux.HandleFunc("GET /stops/{id}/departures", handleDepartures(client, upstreamURL, dynamicCache, metrics))
+	mux.HandleFunc("GET /stops/{id}/arrivals", handleArrivals(client, upstreamURL, dynamicCache, metrics))
+	mux.HandleFunc("GET /stops/{id}", handleStop(client, upstreamURL, staticCache, metrics))
 
-	mux.HandleFunc("GET /journeys/{ref}", handleRefreshJourney(client, upstreamURL, dynamicCache))
-	mux.HandleFunc("GET /journeys", handleJourneys(client, upstreamURL, dynamicCache))
+	mux.HandleFunc("GET /journeys/{ref}", handleRefreshJourney(client, upstreamURL, dynamicCache, metrics))
+	mux.HandleFunc("GET /journeys", handleJourneys(client, upstreamURL, dynamicCache, metrics))
 
-	mux.HandleFunc("GET /trips/{id}", handleTrip(client, upstreamURL, dynamicCache))
-	mux.HandleFunc("GET /trips", handleTrips(client, upstreamURL, dynamicCache))
+	mux.HandleFunc("GET /trips/{id}", handleTrip(client, upstreamURL, dynamicCache, metrics))
+	mux.HandleFunc("GET /trips", handleTrips(client, upstreamURL, dynamicCache, metrics))
 
-	mux.HandleFunc("GET /locations/nearby", handleNearby(client, upstreamURL, staticCache))
-	mux.HandleFunc("GET /locations", handleLocations(client, upstreamURL, staticCache))
+	mux.HandleFunc("GET /locations/nearby", handleNearby(client, upstreamURL, staticCache, metrics))
+	mux.HandleFunc("GET /locations", handleLocations(client, upstreamURL, staticCache, metrics))
 
-	mux.HandleFunc("GET /radar", handleRadar(client, upstreamURL))
+	mux.HandleFunc("GET /radar", handleRadar(client, upstreamURL, metrics))
 
-	mux.HandleFunc("GET /stations/{id}", handleStation(client, upstreamURL, staticCache))
-	mux.HandleFunc("GET /stations", handleStations(client, upstreamURL, staticCache))
+	mux.HandleFunc("GET /stations/{id}", handleStation(client, upstreamURL, staticCache, metrics))
+	mux.HandleFunc("GET /stations", handleStations(client, upstreamURL, staticCache, metrics))
 
-	mux.HandleFunc("GET /lines/{id}", handleLine(client, upstreamURL, staticCache))
-	mux.HandleFunc("GET /lines", handleLines(client, upstreamURL, staticCache))
+	mux.HandleFunc("GET /lines/{id}", handleLine(client, upstreamURL, staticCache, metrics))
+	mux.HandleFunc("GET /lines", handleLines(client, upstreamURL, staticCache, metrics))
 
-	mux.HandleFunc("GET /shapes/{id}", handleShape(client, upstreamURL, staticCache))
+	mux.HandleFunc("GET /shapes/{id}", handleShape(client, upstreamURL, staticCache, metrics))
 
-	mux.HandleFunc("GET /maps/{type}", handleMap(client, upstreamURL, staticCache))
+	mux.HandleFunc("GET /maps/{type}", handleMap(client, upstreamURL, staticCache, metrics))
 
 	return mux
 }
