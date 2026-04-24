@@ -7,6 +7,8 @@ import (
 	"os"
 	"strconv"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 const (
@@ -35,7 +37,9 @@ func main() {
 		config.ListenAddr = DefaultListenAddr
 	}
 
-	mux := newMux(upstreamURL, config.Timeout, config.StaticCacheSize, config.DynamicCacheSize)
+	reg := prometheus.NewRegistry()
+	metrics := NewMetrics(reg)
+	mux := newMux(upstreamURL, config.Timeout, config.StaticCacheSize, config.DynamicCacheSize, metrics)
 
 	slog.Info("starting server", "listenAddr", config.ListenAddr, "timeout", config.Timeout,
 		"staticCacheSize", config.StaticCacheSize, "dynamicCacheSize", config.DynamicCacheSize)

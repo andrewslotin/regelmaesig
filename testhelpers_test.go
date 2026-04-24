@@ -5,13 +5,19 @@ import (
 	"net/http/httptest"
 	"sync"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
+
+func newTestMetrics() *Metrics {
+	return NewMetrics(prometheus.NewRegistry())
+}
 
 // newTestStack spins up a fake upstream and a proxy mux pointing to it.
 // Returns the proxy server URL and a cleanup func.
 func newTestStack(upstreamHandler http.Handler, timeout time.Duration) (srvURL string, cleanup func()) {
 	upstream := httptest.NewServer(upstreamHandler)
-	mux := newMux(upstream.URL, timeout, 0, 0)
+	mux := newMux(upstream.URL, timeout, 0, 0, newTestMetrics())
 	srv := httptest.NewServer(mux)
 	return srv.URL, func() {
 		srv.Close()
@@ -24,7 +30,7 @@ func newUnreachableStack(timeout time.Duration) (srvURL string, cleanup func()) 
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
 	upstreamURL := upstream.URL
 	upstream.Close()
-	mux := newMux(upstreamURL, timeout, 0, 0)
+	mux := newMux(upstreamURL, timeout, 0, 0, newTestMetrics())
 	srv := httptest.NewServer(mux)
 	return srv.URL, srv.Close
 }
@@ -47,7 +53,7 @@ func respondSlow(delay time.Duration) http.HandlerFunc {
 // newCachedTestStack is like newTestStack but with caches enabled.
 func newCachedTestStack(upstreamHandler http.Handler, timeout time.Duration, staticCap, dynamicCap int) (srvURL string, cleanup func()) {
 	upstream := httptest.NewServer(upstreamHandler)
-	mux := newMux(upstream.URL, timeout, staticCap, dynamicCap)
+	mux := newMux(upstream.URL, timeout, staticCap, dynamicCap, newTestMetrics())
 	srv := httptest.NewServer(mux)
 	return srv.URL, func() {
 		srv.Close()

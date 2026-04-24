@@ -9,7 +9,7 @@ import (
 // upstreamURL and timeout are injected so tests can use a local server.
 // staticCap and dynamicCap control the LRU capacity for each cache tier;
 // 0 disables that tier.
-func newMux(upstreamURL string, timeout time.Duration, staticCap, dynamicCap int) *http.ServeMux {
+func newMux(upstreamURL string, timeout time.Duration, staticCap, dynamicCap int, metrics *Metrics) *http.ServeMux {
 	client := &http.Client{
 		Timeout: timeout,
 		CheckRedirect: func(_ *http.Request, _ []*http.Request) error {
@@ -21,6 +21,8 @@ func newMux(upstreamURL string, timeout time.Duration, staticCap, dynamicCap int
 	dynamicCache := NewCache(dynamicCap)
 
 	mux := http.NewServeMux()
+
+	mux.Handle("GET /metrics", metrics.Handler())
 
 	mux.HandleFunc("GET /stops/reachable-from", handleReachableFrom(client, upstreamURL, dynamicCache))
 	mux.HandleFunc("GET /stops/{id}/departures", handleDepartures(client, upstreamURL, dynamicCache))
