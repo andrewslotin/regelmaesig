@@ -1,0 +1,3 @@
+- [Run tests and build commands](feedback_run_tests.md) — run go build/vet/golangci-lint/test after implementation, don't ask user to do it
+- [Commit message style](feedback_commits.md) — single short subject line only, no body, no multi-line format
+- [Handle io.ReadAll errors in caching handlers](feedback_errcheck_io_readall.md) — never ignore io.ReadAll errors when buffering for cache; truncated body must not be stored or served

@@ -38,6 +38,10 @@ go test ./... -run TestName
 | `handle_<resource>.go` | One file per resource; each handler forwards to upstream or returns a typed empty response |
 | `testhelpers_test.go` | `newTestStack`, `newUnreachableStack`, `respondWith`, `respondSlow` |
 
+## Memory
+
+Project memory lives at `.claude/memory/` in this repository. Read and write all memory files there — this overrides the default global memory path.
+
 ## Adding a New Endpoint
 
 1. Add a handler function in the relevant `handle_<resource>.go` (or create a new file)
