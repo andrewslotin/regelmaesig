@@ -10,6 +10,14 @@ quickly puts them in degraded mode.
 Usage
 -----
 
+**Docker** (amd64/arm64):
+
+```bash
+docker run -p 8080:8080 ghcr.io/andrewslotin/regelmaesig
+```
+
+**Go install**:
+
 ```bash
 go install github.com/andrewslotin/regelmaesig
 regelmaesig [-l <listen-addr>] [-t <timeout>]
