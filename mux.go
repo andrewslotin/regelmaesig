@@ -46,7 +46,7 @@ func newMux(upstreamURL string, timeout time.Duration, staticCap, dynamicCap int
 
 	mux.HandleFunc("GET /shapes/{id}", handleShape(client, upstreamURL, staticCache))
 
-	mux.HandleFunc("GET /maps/{type}", handleMap(client, upstreamURL))
+	mux.HandleFunc("GET /maps/{type}", handleMap(client, upstreamURL, staticCache))
 
 	return mux
 }

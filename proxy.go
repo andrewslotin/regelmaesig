@@ -89,18 +89,23 @@ func newStandardHandler(client *http.Client, upstream, emptyBody string, cache *
 	}
 }
 
+// writeFromCache writes a cached entry to w with X-Cache: HIT.
+func writeFromCache(w http.ResponseWriter, entry *cacheEntry) {
+	w.Header().Set("X-Cache", "HIT")
+	for k, vs := range entry.header {
+		for _, v := range vs {
+			w.Header().Add(k, v)
+		}
+	}
+	w.WriteHeader(entry.statusCode)
+	w.Write(entry.body) //nolint:errcheck
+}
+
 // serveFallback writes a cached response with X-Cache: HIT, or the empty JSON fallback
 // with X-Cache: MISS when no cached entry is available.
 func serveFallback(w http.ResponseWriter, cache *Cache, key, emptyBody string) {
 	if entry, ok := cache.Get(key); ok {
-		w.Header().Set("X-Cache", "HIT")
-		for k, vs := range entry.header {
-			for _, v := range vs {
-				w.Header().Add(k, v)
-			}
-		}
-		w.WriteHeader(entry.statusCode)
-		w.Write(entry.body) //nolint:errcheck
+		writeFromCache(w, entry)
 		return
 	}
 	w.Header().Set("X-Cache", "MISS")
