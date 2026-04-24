@@ -19,14 +19,13 @@ func newMux(upstreamURL string, timeout time.Duration, staticCap, dynamicCap int
 
 	staticCache := NewCache(staticCap)
 	dynamicCache := NewCache(dynamicCap)
-	_ = staticCache
 
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /stops/reachable-from", handleReachableFrom(client, upstreamURL, dynamicCache))
 	mux.HandleFunc("GET /stops/{id}/departures", handleDepartures(client, upstreamURL, dynamicCache))
 	mux.HandleFunc("GET /stops/{id}/arrivals", handleArrivals(client, upstreamURL, dynamicCache))
-	mux.HandleFunc("GET /stops/{id}", handleStop(client, upstreamURL))
+	mux.HandleFunc("GET /stops/{id}", handleStop(client, upstreamURL, staticCache))
 
 	mux.HandleFunc("GET /journeys/{ref}", handleRefreshJourney(client, upstreamURL, dynamicCache))
 	mux.HandleFunc("GET /journeys", handleJourneys(client, upstreamURL, dynamicCache))

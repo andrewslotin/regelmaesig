@@ -199,3 +199,42 @@ func TestStop_Timeout(t *testing.T) {
 		t.Errorf("unexpected body: %s", body)
 	}
 }
+
+func TestStop_CacheHit(t *testing.T) {
+	data := `{"id":"900000100001","name":"S+U Zoologischer Garten"}`
+	srvURL, cleanup := newCachedTestStack(respondOnce(data), 5*time.Second, 10, 0)
+	defer cleanup()
+
+	resp, _ := http.Get(srvURL + "/stops/900000100001")
+	io.ReadAll(resp.Body) //nolint:errcheck
+	resp.Body.Close()    //nolint:errcheck
+
+	resp, err := http.Get(srvURL + "/stops/900000100001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if got := resp.Header.Get("X-Cache"); got != "HIT" {
+		t.Errorf("expected X-Cache: HIT, got %q", got)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	if string(body) != data {
+		t.Errorf("expected cached body, got %s", body)
+	}
+}
+
+func TestStop_CacheMiss(t *testing.T) {
+	srvURL, cleanup := newCachedTestStack(respondWith(http.StatusServiceUnavailable, ``), 5*time.Second, 10, 0)
+	defer cleanup()
+
+	resp, err := http.Get(srvURL + "/stops/900000100001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	if got := resp.Header.Get("X-Cache"); got != "MISS" {
+		t.Errorf("expected X-Cache: MISS, got %q", got)
+	}
+}
