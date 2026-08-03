@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"net/http"
 	"time"
 )
@@ -50,5 +51,15 @@ func newMux(upstreamURL string, timeout time.Duration, staticCap, dynamicCap int
 
 	mux.HandleFunc("GET /maps/{type}", handleMap(client, upstreamURL, staticCache, metrics))
 
+	mux.HandleFunc("GET /compact/departures", handleCompactDepartures(client, upstreamURL, dynamicCache, metrics))
+	mux.HandleFunc("GET /healthz", handleHealthz)
+
 	return mux
+}
+
+// handleHealthz is a trivial liveness probe handler.
+func handleHealthz(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusOK)
+	io.WriteString(w, "ok") //nolint:errcheck
 }
