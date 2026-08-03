@@ -15,49 +15,49 @@ import (
 	"time"
 )
 
-// Constants for the /garmin/departures endpoint. Prefixed "garmin" to avoid
+// Constants for the /compact/departures endpoint. Prefixed "compact" to avoid
 // collisions with the rest of package main.
 const (
-	garminRoutePath = "/garmin/departures"
-	garminUserAgent = "regelmaesig/1.0 (+https://github.com/andrewslotin/regelmaesig)"
+	compactRoutePath = "/compact/departures"
+	compactUserAgent = "regelmaesig/1.0 (+https://github.com/andrewslotin/regelmaesig)"
 
-	garminMaxStops       = 4
-	garminMaxIDLen       = 12
-	garminDirectionRunes = 24
-	garminPastGrace      = 30 * time.Second
+	compactMaxStops       = 4
+	compactMaxIDLen       = 12
+	compactDirectionRunes = 24
+	compactPastGrace      = 30 * time.Second
 
-	garminDefaultDuration = 30
-	garminMinDuration     = 10
-	garminMaxDuration     = 120
+	compactDefaultDuration = 30
+	compactMinDuration     = 10
+	compactMaxDuration     = 120
 
-	garminDefaultLimit = 6
-	garminMinLimit     = 1
-	garminMaxLimit     = 10
+	compactDefaultLimit = 6
+	compactMinLimit     = 1
+	compactMaxLimit     = 10
 )
 
 // Error response bodies, shared with tests.
 const (
-	garminErrBadRequest = `{"error":"bad_request"}`
-	garminErrUpstream   = `{"error":"upstream"}`
-	garminErrInternal   = `{"error":"internal"}`
+	compactErrBadRequest = `{"error":"bad_request"}`
+	compactErrUpstream   = `{"error":"upstream"}`
+	compactErrInternal   = `{"error":"internal"}`
 )
 
 // -- wire response schema (field order is significant: encoding/json marshals
 // struct fields in declaration order, and tests assert exact bodies) --
 
-type garminResponse struct {
-	AsOf    int64         `json:"asOf"`
-	Partial int           `json:"partial"`
-	Boards  []garminBoard `json:"boards"`
+type compactResponse struct {
+	AsOf    int64          `json:"asOf"`
+	Partial int            `json:"partial"`
+	Boards  []compactBoard `json:"boards"`
 }
 
-type garminBoard struct {
-	ID         string            `json:"id"`
-	Name       string            `json:"n"`
-	Departures []garminDeparture `json:"d"`
+type compactBoard struct {
+	ID         string             `json:"id"`
+	Name       string             `json:"n"`
+	Departures []compactDeparture `json:"d"`
 }
 
-type garminDeparture struct {
+type compactDeparture struct {
 	Line      string `json:"l"`
 	Product   string `json:"p"`
 	Direction string `json:"dir"`
@@ -69,12 +69,12 @@ type garminDeparture struct {
 
 // -- upstream decode schema (only the fields this endpoint needs) --
 
-type garminUpstreamResponse struct {
-	Departures            []garminUpstreamDeparture `json:"departures"`
-	RealtimeDataUpdatedAt int64                     `json:"realtimeDataUpdatedAt"`
+type compactUpstreamResponse struct {
+	Departures            []compactUpstreamDeparture `json:"departures"`
+	RealtimeDataUpdatedAt int64                      `json:"realtimeDataUpdatedAt"`
 }
 
-type garminUpstreamDeparture struct {
+type compactUpstreamDeparture struct {
 	When        string   `json:"when"`
 	PlannedWhen string   `json:"plannedWhen"`
 	Delay       *float64 `json:"delay"`
@@ -92,39 +92,40 @@ type garminUpstreamDeparture struct {
 	} `json:"remarks"`
 }
 
-// handleGarminDepartures serves a compact multi-stop departure board for the
-// Garmin watch app. Unlike newStandardHandler/newPassthroughHandler, it fans
+// handleCompactDepartures serves a compact, transformed multi-stop departure
+// board for lightweight clients (watch apps, widgets, e-ink displays).
+// Unlike newStandardHandler/newPassthroughHandler, it fans
 // out to N synthesized upstream requests (one per requested stop) and
 // transforms the payload; the cache is used purely as a stale-if-error
 // fallback when every fetch fails — there is no "serve from cache while
 // fresh" fast path.
-func handleGarminDepartures(client *http.Client, upstream string, cache *Cache, metrics *Metrics) http.HandlerFunc {
+func handleCompactDepartures(client *http.Client, upstream string, cache *Cache, metrics *Metrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		stops, ok := parseGarminStops(r.URL.Query().Get("stops"))
+		stops, ok := parseCompactStops(r.URL.Query().Get("stops"))
 		if !ok {
-			writeGarminJSON(w, http.StatusBadRequest, []byte(garminErrBadRequest))
+			writeCompactJSON(w, http.StatusBadRequest, []byte(compactErrBadRequest))
 			return
 		}
-		duration := parseGarminClamped(r.URL.Query().Get("duration"), garminDefaultDuration, garminMinDuration, garminMaxDuration)
-		limit := parseGarminClamped(r.URL.Query().Get("limit"), garminDefaultLimit, garminMinLimit, garminMaxLimit)
+		duration := parseCompactClamped(r.URL.Query().Get("duration"), compactDefaultDuration, compactMinDuration, compactMaxDuration)
+		limit := parseCompactClamped(r.URL.Query().Get("limit"), compactDefaultLimit, compactMinLimit, compactMaxLimit)
 
-		key := garminCacheKey(stops, duration, limit)
+		key := compactCacheKey(stops, duration, limit)
 
 		// One goroutine per requested stop, each writing only to its own
 		// index of results — no mutex needed since indices never overlap.
-		results := make([]garminFetchResult, len(stops))
+		results := make([]compactFetchResult, len(stops))
 		var wg sync.WaitGroup
 		wg.Add(len(stops))
 		for i, id := range stops {
 			go func(i int, id string) {
 				defer wg.Done()
-				board, updatedAt, err := fetchGarminBoard(r.Context(), client, upstream, id, duration, metrics)
-				results[i] = garminFetchResult{board: board, realtimeDataUpdatedAt: updatedAt, err: err}
+				board, updatedAt, err := fetchCompactBoard(r.Context(), client, upstream, id, duration, metrics)
+				results[i] = compactFetchResult{board: board, realtimeDataUpdatedAt: updatedAt, err: err}
 			}(i, id)
 		}
 		wg.Wait()
 
-		boards := make([]garminBoard, 0, len(stops))
+		boards := make([]compactBoard, 0, len(stops))
 		var asOf int64
 		failed := false
 		for _, res := range results {
@@ -145,11 +146,11 @@ func handleGarminDepartures(client *http.Client, upstream string, cache *Cache, 
 		if len(boards) == 0 {
 			if entry, ok := cache.Get(key); ok {
 				w.Header().Set("X-Cache", "HIT")
-				writeGarminJSON(w, http.StatusOK, entry.body)
+				writeCompactJSON(w, http.StatusOK, entry.body)
 				return
 			}
-			metrics.FallbackResponsesTotal.WithLabelValues(http.MethodGet, garminRoutePath).Inc()
-			writeGarminJSON(w, http.StatusBadGateway, []byte(garminErrUpstream))
+			metrics.FallbackResponsesTotal.WithLabelValues(http.MethodGet, compactRoutePath).Inc()
+			writeCompactJSON(w, http.StatusBadGateway, []byte(compactErrUpstream))
 			return
 		}
 
@@ -161,9 +162,9 @@ func handleGarminDepartures(client *http.Client, upstream string, cache *Cache, 
 			partial = 1
 		}
 
-		body, err := json.Marshal(garminResponse{AsOf: asOf, Partial: partial, Boards: boards})
+		body, err := json.Marshal(compactResponse{AsOf: asOf, Partial: partial, Boards: boards})
 		if err != nil {
-			writeGarminJSON(w, http.StatusInternalServerError, []byte(garminErrInternal))
+			writeCompactJSON(w, http.StatusInternalServerError, []byte(compactErrInternal))
 			return
 		}
 
@@ -171,7 +172,7 @@ func handleGarminDepartures(client *http.Client, upstream string, cache *Cache, 
 		// departure time in the body, so a body with no departures at all
 		// (expiresAt zero) is never stored either.
 		if partial == 0 {
-			if expiresAt := garminCacheExpiry(boards); expiresAt.After(time.Now()) {
+			if expiresAt := compactCacheExpiry(boards); expiresAt.After(time.Now()) {
 				cache.Set(key, &cacheEntry{
 					statusCode: http.StatusOK,
 					body:       body,
@@ -180,19 +181,19 @@ func handleGarminDepartures(client *http.Client, upstream string, cache *Cache, 
 			}
 		}
 
-		writeGarminJSON(w, http.StatusOK, body)
+		writeCompactJSON(w, http.StatusOK, body)
 	}
 }
 
-// garminFetchResult carries the outcome of a single per-stop upstream fetch.
-type garminFetchResult struct {
-	board                 *garminBoard
+// compactFetchResult carries the outcome of a single per-stop upstream fetch.
+type compactFetchResult struct {
+	board                 *compactBoard
 	realtimeDataUpdatedAt int64
 	err                   error
 }
 
-// fetchGarminBoard fetches and transforms a single stop's departure board.
-func fetchGarminBoard(ctx context.Context, client *http.Client, upstream, id string, duration int, metrics *Metrics) (*garminBoard, int64, error) {
+// fetchCompactBoard fetches and transforms a single stop's departure board.
+func fetchCompactBoard(ctx context.Context, client *http.Client, upstream, id string, duration int, metrics *Metrics) (*compactBoard, int64, error) {
 	url := upstream + "/stops/" + id + "/departures?duration=" + strconv.Itoa(duration) +
 		"&results=20&remarks=true&language=en&suburban=true&subway=true&tram=true&bus=true&ferry=true&regional=true&express=false&pretty=false"
 
@@ -200,44 +201,44 @@ func fetchGarminBoard(ctx context.Context, client *http.Client, upstream, id str
 	if err != nil {
 		return nil, 0, err
 	}
-	req.Header.Set("User-Agent", garminUserAgent)
+	req.Header.Set("User-Agent", compactUserAgent)
 
 	start := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
-		metrics.UpstreamErrorsTotal.WithLabelValues(http.MethodGet, garminRoutePath, errorReason(err)).Inc()
+		metrics.UpstreamErrorsTotal.WithLabelValues(http.MethodGet, compactRoutePath, errorReason(err)).Inc()
 		return nil, 0, err
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
-	metrics.UpstreamRequestDuration.WithLabelValues(http.MethodGet, garminRoutePath).Observe(time.Since(start).Seconds())
-	metrics.UpstreamRequestsTotal.WithLabelValues(http.MethodGet, garminRoutePath, strconv.Itoa(resp.StatusCode)).Inc()
+	metrics.UpstreamRequestDuration.WithLabelValues(http.MethodGet, compactRoutePath).Observe(time.Since(start).Seconds())
+	metrics.UpstreamRequestsTotal.WithLabelValues(http.MethodGet, compactRoutePath, strconv.Itoa(resp.StatusCode)).Inc()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		io.Copy(io.Discard, resp.Body) //nolint:errcheck
-		metrics.UpstreamErrorsTotal.WithLabelValues(http.MethodGet, garminRoutePath, httpErrorReason(resp.StatusCode)).Inc()
+		metrics.UpstreamErrorsTotal.WithLabelValues(http.MethodGet, compactRoutePath, httpErrorReason(resp.StatusCode)).Inc()
 		return nil, 0, fmt.Errorf("upstream returned status %d", resp.StatusCode)
 	}
 
-	var decoded garminUpstreamResponse
+	var decoded compactUpstreamResponse
 	if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
 		return nil, 0, err
 	}
 
-	return transformGarminBoard(id, decoded), decoded.RealtimeDataUpdatedAt, nil
+	return transformCompactBoard(id, decoded), decoded.RealtimeDataUpdatedAt, nil
 }
 
-// transformGarminBoard is a pure function mapping a decoded upstream response
-// to the wire board shape. Kept separate from fetchGarminBoard so it can be
+// transformCompactBoard is a pure function mapping a decoded upstream response
+// to the wire board shape. Kept separate from fetchCompactBoard so it can be
 // tested without spinning up an HTTP server.
-func transformGarminBoard(id string, upstream garminUpstreamResponse) *garminBoard {
-	board := &garminBoard{
+func transformCompactBoard(id string, upstream compactUpstreamResponse) *compactBoard {
+	board := &compactBoard{
 		ID:         id,
 		Name:       id,
-		Departures: []garminDeparture{},
+		Departures: []compactDeparture{},
 	}
 
-	cutoff := time.Now().Add(-garminPastGrace)
+	cutoff := time.Now().Add(-compactPastGrace)
 	nameSet := false
 
 	for _, d := range upstream.Departures {
@@ -275,10 +276,10 @@ func transformGarminBoard(id string, upstream garminUpstreamResponse) *garminBoa
 			}
 		}
 
-		board.Departures = append(board.Departures, garminDeparture{
+		board.Departures = append(board.Departures, compactDeparture{
 			Line:      line,
 			Product:   d.Line.Product,
-			Direction: garminStripDirection(d.Direction),
+			Direction: compactStripDirection(d.Direction),
 			Time:      t.Unix(),
 			Delay:     delay,
 			Cancelled: cancelled,
@@ -286,17 +287,17 @@ func transformGarminBoard(id string, upstream garminUpstreamResponse) *garminBoa
 		})
 	}
 
-	slices.SortStableFunc(board.Departures, func(a, b garminDeparture) int {
+	slices.SortStableFunc(board.Departures, func(a, b compactDeparture) int {
 		return cmp.Compare(a.Time, b.Time)
 	})
 
 	return board
 }
 
-// garminStripDirection strips the first matching prefix of "S+U ", "U ", "S "
+// compactStripDirection strips the first matching prefix of "S+U ", "U ", "S "
 // (checked in that order, at most one strip), then truncates to
-// garminDirectionRunes runes (never bytes — direction names contain umlauts).
-func garminStripDirection(dir string) string {
+// compactDirectionRunes runes (never bytes — direction names contain umlauts).
+func compactStripDirection(dir string) string {
 	for _, prefix := range []string{"S+U ", "U ", "S "} {
 		if strings.HasPrefix(dir, prefix) {
 			dir = strings.TrimPrefix(dir, prefix)
@@ -305,16 +306,16 @@ func garminStripDirection(dir string) string {
 	}
 
 	runes := []rune(dir)
-	if len(runes) > garminDirectionRunes {
-		runes = runes[:garminDirectionRunes]
+	if len(runes) > compactDirectionRunes {
+		runes = runes[:compactDirectionRunes]
 	}
 	return string(runes)
 }
 
-// parseGarminStops validates and parses the "stops" query parameter per §1:
+// parseCompactStops validates and parses the "stops" query parameter per §1:
 // 1-4 comma-separated segments, each 1-12 ASCII digits; empty segments
 // between commas are skipped.
-func parseGarminStops(raw string) ([]string, bool) {
+func parseCompactStops(raw string) ([]string, bool) {
 	if raw == "" {
 		return nil, false
 	}
@@ -324,21 +325,21 @@ func parseGarminStops(raw string) ([]string, bool) {
 		if seg == "" {
 			continue
 		}
-		if !isGarminStopID(seg) {
+		if !isCompactStopID(seg) {
 			return nil, false
 		}
 		stops = append(stops, seg)
 	}
 
-	if len(stops) == 0 || len(stops) > garminMaxStops {
+	if len(stops) == 0 || len(stops) > compactMaxStops {
 		return nil, false
 	}
 	return stops, true
 }
 
-// isGarminStopID reports whether s matches ^[0-9]{1,12}$.
-func isGarminStopID(s string) bool {
-	if len(s) == 0 || len(s) > garminMaxIDLen {
+// isCompactStopID reports whether s matches ^[0-9]{1,12}$.
+func isCompactStopID(s string) bool {
+	if len(s) == 0 || len(s) > compactMaxIDLen {
 		return false
 	}
 	for _, c := range s {
@@ -349,10 +350,10 @@ func isGarminStopID(s string) bool {
 	return true
 }
 
-// parseGarminClamped parses raw as an int, falling back to def on empty or
+// parseCompactClamped parses raw as an int, falling back to def on empty or
 // unparseable input, then clamps the result to [min, max]. Never produces an
 // error — duration and limit can never cause a 400.
-func parseGarminClamped(raw string, def, min, max int) int {
+func parseCompactClamped(raw string, def, min, max int) int {
 	if raw == "" {
 		return def
 	}
@@ -369,17 +370,17 @@ func parseGarminClamped(raw string, def, min, max int) int {
 	return v
 }
 
-// garminCacheKey builds the cache key from canonical, post-validation params.
+// compactCacheKey builds the cache key from canonical, post-validation params.
 // limit is included because the marshaled post-limit body is what gets
 // cached.
-func garminCacheKey(stops []string, duration, limit int) string {
-	return garminRoutePath + "?stops=" + strings.Join(stops, ",") +
+func compactCacheKey(stops []string, duration, limit int) string {
+	return compactRoutePath + "?stops=" + strings.Join(stops, ",") +
 		"&duration=" + strconv.Itoa(duration) + "&limit=" + strconv.Itoa(limit)
 }
 
-// garminCacheExpiry returns the latest departure time across all boards, or
+// compactCacheExpiry returns the latest departure time across all boards, or
 // the zero time if there are no departures at all.
-func garminCacheExpiry(boards []garminBoard) time.Time {
+func compactCacheExpiry(boards []compactBoard) time.Time {
 	var maxT int64
 	for _, b := range boards {
 		for _, d := range b.Departures {
@@ -394,10 +395,10 @@ func garminCacheExpiry(boards []garminBoard) time.Time {
 	return time.Unix(maxT, 0)
 }
 
-// writeGarminJSON writes body with the given status, always setting
+// writeCompactJSON writes body with the given status, always setting
 // Content-Type: application/json first — the watch hard-fails on any other
 // content type.
-func writeGarminJSON(w http.ResponseWriter, status int, body []byte) {
+func writeCompactJSON(w http.ResponseWriter, status int, body []byte) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	w.Write(body) //nolint:errcheck

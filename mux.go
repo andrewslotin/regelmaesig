@@ -51,7 +51,7 @@ func newMux(upstreamURL string, timeout time.Duration, staticCap, dynamicCap int
 
 	mux.HandleFunc("GET /maps/{type}", handleMap(client, upstreamURL, staticCache, metrics))
 
-	mux.HandleFunc("GET /garmin/departures", handleGarminDepartures(client, upstreamURL, dynamicCache, metrics))
+	mux.HandleFunc("GET /compact/departures", handleCompactDepartures(client, upstreamURL, dynamicCache, metrics))
 	mux.HandleFunc("GET /healthz", handleHealthz)
 
 	return mux

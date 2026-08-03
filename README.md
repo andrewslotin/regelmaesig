@@ -30,16 +30,17 @@ regelmaesig [-l <listen-addr>] [-t <timeout>]
 
 The proxy forwards all requests to `https://v6.vbb.transport.rest`. When the upstream returns a non-2xx response, times out, or is unreachable, it returns HTTP 200 with a properly-typed empty JSON body so polling clients stay healthy.
 
-Watch endpoint
---------------
+Compact endpoint
+----------------
 
-Every route above is a 1-to-1 mirror of `v6.vbb.transport.rest`. The `/garmin/`
+Every route above is a 1-to-1 mirror of `v6.vbb.transport.rest`. The `/compact/`
 namespace is the exception: it serves a **compact, transformed** multi-stop
-departure board for a Garmin watch app, so the watch does zero interpretation
-and payloads stay small (a 2-stop, 6-departure board is well under 2 KB).
+departure board for lightweight clients (watch apps, widgets, e-ink displays),
+so the client does zero interpretation and payloads stay small (a 2-stop,
+6-departure board is well under 2 KB).
 
 ```
-GET /garmin/departures?stops=<id>[,<id>...]&duration=<min>&limit=<n>
+GET /compact/departures?stops=<id>[,<id>...]&duration=<min>&limit=<n>
 ```
 
 | Param | Required | Default | Constraints | Meaning |
