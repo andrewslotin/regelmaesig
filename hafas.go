@@ -279,11 +279,17 @@ func parseHAFASTime(date, timeStr string, tzOffset int) time.Time {
 	year, _ := strconv.Atoi(date[0:4])
 	month, _ := strconv.Atoi(date[4:6])
 	day, _ := strconv.Atoi(date[6:8])
-	hour, _ := strconv.Atoi(timeStr[0 : len(timeStr)-4])
+
+	var dayOffset, hour int
+	if len(timeStr) > 6 {
+		dayOffset, _ = strconv.Atoi(timeStr[0 : len(timeStr)-6])
+	}
+	hour, _ = strconv.Atoi(timeStr[len(timeStr)-6 : len(timeStr)-4])
 	min, _ := strconv.Atoi(timeStr[len(timeStr)-4 : len(timeStr)-2])
 	sec, _ := strconv.Atoi(timeStr[len(timeStr)-2:])
+
 	loc := time.FixedZone("", tzOffset*60)
-	t := time.Date(year, time.Month(month), day, hour, min, sec, 0, loc)
+	t := time.Date(year, time.Month(month), day+dayOffset, hour, min, sec, 0, loc)
 	return t
 }
 

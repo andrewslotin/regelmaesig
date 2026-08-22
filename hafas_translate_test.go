@@ -159,6 +159,44 @@ func TestTranslateDepartures(t *testing.T) {
 			t.Errorf("plannedWhen = %v, want %v", parsed, expected)
 		}
 	})
+
+	t.Run("day offset time format", func(t *testing.T) {
+		res := &hafasStationBoardResult{
+			Common: hafasCommon{
+				LocL:  []hafasLocation{{Name: "Test", ExtID: "123", Crd: hafasCrd{X: 13000000, Y: 52000000}, PCls: 1, TZOffset: 120}},
+				ProdL: []hafasProduct{{Name: "S1", NameS: "S1", Cls: 1}},
+			},
+			JnyL: []hafasJourney{
+				{JID: "test-jid", Date: "20260822", ProdX: 0, DirTxt: "Somewhere",
+					StbStop: hafasStbStop{LocX: 0, DTimeS: "01010700"}},
+			},
+		}
+
+		body, err := translateDepartures(res)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var result restDeparturesResponse
+		if err := json.Unmarshal(body, &result); err != nil {
+			t.Fatal(err)
+		}
+
+		if len(result.Departures) != 1 {
+			t.Fatalf("expected 1 departure, got %d", len(result.Departures))
+		}
+
+		// "01010700" on Aug 22 = day+1, 01:07:00 = Aug 23 01:07:00
+		loc := time.FixedZone("", 120*60)
+		expected := time.Date(2026, 8, 23, 1, 7, 0, 0, loc)
+		parsed, err := time.Parse("2006-01-02T15:04:05-07:00", result.Departures[0].PlannedWhen)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !parsed.Equal(expected) {
+			t.Errorf("plannedWhen = %v, want %v", parsed, expected)
+		}
+	})
 }
 
 func TestTranslateArrivals(t *testing.T) {
