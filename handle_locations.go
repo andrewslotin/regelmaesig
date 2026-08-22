@@ -4,10 +4,10 @@ import (
 	"net/http"
 )
 
-func handleLocations(client *http.Client, upstream string, cache *Cache, metrics *Metrics) http.HandlerFunc {
-	return newStandardHandler(client, upstream, `[]`, cache, nil, metrics)
+func handleLocations(providers []DataProvider, cache *Cache, metrics *Metrics) http.HandlerFunc {
+	return newStandardHandler(providers, `[]`, cache, nil, metrics)
 }
 
-func handleNearby(client *http.Client, upstream string, cache *Cache, metrics *Metrics) http.HandlerFunc {
-	return newStandardHandler(client, upstream, `[]`, cache, nil, metrics)
+func handleNearby(providers []DataProvider, cache *Cache, metrics *Metrics) http.HandlerFunc {
+	return newStandardHandler(providers, `[]`, cache, nil, metrics)
 }

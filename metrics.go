@@ -27,17 +27,17 @@ func NewMetrics(reg *prometheus.Registry) *Metrics {
 		reg: reg,
 		UpstreamRequestsTotal: factory.NewCounterVec(prometheus.CounterOpts{
 			Name: "upstream_requests_total",
-			Help: "Total requests forwarded to upstream, by method, path pattern, and HTTP status.",
-		}, []string{"method", "path", "status"}),
+			Help: "Total requests forwarded to upstream, by upstream, method, path pattern, and HTTP status.",
+		}, []string{"upstream", "method", "path", "status"}),
 		UpstreamRequestDuration: factory.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "upstream_request_duration_seconds",
-			Help:    "Upstream response latency in seconds.",
+			Help:    "Upstream response latency in seconds, by upstream.",
 			Buckets: prometheus.DefBuckets,
-		}, []string{"method", "path"}),
+		}, []string{"upstream", "method", "path"}),
 		UpstreamErrorsTotal: factory.NewCounterVec(prometheus.CounterOpts{
 			Name: "upstream_errors_total",
-			Help: "Upstream failures by method, path pattern, and reason (timeout, connection_refused, http_5xx, etc.).",
-		}, []string{"method", "path", "reason"}),
+			Help: "Upstream failures by upstream, method, path pattern, and reason (timeout, connection_refused, http_5xx, etc.).",
+		}, []string{"upstream", "method", "path", "reason"}),
 		FallbackResponsesTotal: factory.NewCounterVec(prometheus.CounterOpts{
 			Name: "fallback_responses_total",
 			Help: "How often the proxy returned an empty fallback instead of upstream data.",

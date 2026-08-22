@@ -33,10 +33,12 @@ go test ./... -run TestName
 | File | Purpose |
 |---|---|
 | `main.go` | Config flags (`-l` listen addr, `-t` timeout), server startup |
-| `mux.go` | `newMux(upstreamURL, timeout, staticCap, dynamicCap, metrics)` — registers all routes (including `GET /metrics`), injectable for tests |
-| `proxy.go` | Shared helpers: `forward`, `copyUpstreamResponse`, `writeEmptyJSON`, `newStandardHandler`, `newPassthroughHandler`, `serveFallback` |
-| `metrics.go` | `Metrics` struct + `NewMetrics(reg)` — four Prometheus counters/histogram; `errorReason` classifies network errors; `routePath` extracts low-cardinality path labels from `r.Pattern` |
-| `handle_<resource>.go` | One file per resource; each handler forwards to upstream or returns a typed empty response |
+| `mux.go` | `newMux(upstreamURL, timeout, staticCap, dynamicCap, metrics, hafas)` — registers all routes (including `GET /metrics`), builds provider chains with optional HAFAS fallback, injectable for tests |
+| `proxy.go` | `DataProvider` func type, `TransportRESTClient` (wraps transport.rest upstream), shared helpers: `forward`, `copyUpstreamResponse`, `writeEmptyJSON`, `newStandardHandler` (accepts `[]DataProvider`), `newPassthroughHandler`, `serveFallback` |
+| `metrics.go` | `Metrics` struct + `NewMetrics(reg)` — four Prometheus counters/histogram with `upstream` label on three vectors; `errorReason` classifies network errors; `routePath` extracts low-cardinality path labels from `r.Pattern` |
+| `hafas.go` | `HAFASClient` — HAFAS mgate.exe client with `DataProvider` methods (`Departures`, `Arrivals`, `Locations`, `Nearby`, `Stop`); HAFAS request/response structs; helpers (`parseHAFASTime`, `hafasProductName`, `hafasProductsMap`) |
+| `hafas_translate.go` | Translates HAFAS responses to transport.rest-compatible JSON: `translateDepartures`, `translateArrivals`, `translateLocations`, `translateNearbyLocations`, `translateStop`; REST response structs |
+| `handle_<resource>.go` | One file per resource; each handler accepts `[]DataProvider` and delegates to `newStandardHandler` |
 | `testhelpers_test.go` | `newTestStack`, `newUnreachableStack`, `respondWith`, `respondSlow` |
 
 ## Memory
@@ -45,6 +47,7 @@ Project memory lives at `.claude/memory/` in this repository. Read and write all
 
 ## Adding a New Endpoint
 
-1. Add a handler function in the relevant `handle_<resource>.go` (or create a new file); accept `metrics *Metrics` and pass it to `newStandardHandler` (or `newPassthroughHandler` for no-cache handlers)
-2. Register the route in `newMux()` in `mux.go`, passing `metrics`
+1. Add a handler function in the relevant `handle_<resource>.go` (or create a new file); accept `providers []DataProvider` and pass it to `newStandardHandler` (or `newPassthroughHandler` for no-cache handlers that only use transport.rest)
+2. Register the route in `newMux()` in `mux.go`; use `restOnly` for transport.rest-only routes, or build a provider list with HAFAS fallback if supported
 3. Add tests in `handle_<resource>_test.go` covering: success, upstream error, network error, timeout
+4. HAFAS fallback: add a `DataProvider` method on `HAFASClient` in `hafas.go` and a translation function in `hafas_translate.go`; wire it into the provider list in `mux.go`

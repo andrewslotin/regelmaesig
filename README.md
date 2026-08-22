@@ -30,6 +30,26 @@ regelmaesig [-l <listen-addr>] [-t <timeout>]
 
 The proxy forwards all requests to `https://v6.vbb.transport.rest`. When the upstream returns a non-2xx response, times out, or is unreachable, it returns HTTP 200 with a properly-typed empty JSON body so polling clients stay healthy.
 
+### HAFAS fallback
+
+When transport.rest is down, the proxy can fall back to the underlying HAFAS `mgate.exe` API directly. This is disabled by default and activated via environment variables:
+
+| Env | Required | Default | Description |
+|---|---|---|---|
+| `HAFAS_ENDPOINT` | yes | — | HAFAS mgate.exe URL (e.g. `https://fahrinfo.vbb.de/bin/mgate.exe`) |
+| `HAFAS_AUTH_AID` | yes | — | HAFAS authentication AID (e.g. `hafas-vbb-webapp`) |
+| `HAFAS_VERSION` | no | `1.45` | HAFAS protocol version |
+
+Both `HAFAS_ENDPOINT` and `HAFAS_AUTH_AID` must be set to enable the fallback. When enabled, the proxy tries transport.rest first and falls back to HAFAS for: departures, arrivals, locations, nearby, stops, and compact departures.
+
+```bash
+HAFAS_ENDPOINT=https://fahrinfo.vbb.de/bin/mgate.exe \
+HAFAS_AUTH_AID=hafas-vbb-webapp \
+regelmaesig
+```
+
+HAFAS responses are translated to the same JSON format as transport.rest, so clients see no difference. Per-upstream metrics are available via the `upstream` label (`"transport_rest"` or `"hafas"`) on `upstream_requests_total`, `upstream_request_duration_seconds`, and `upstream_errors_total`.
+
 Compact endpoint
 ----------------
 

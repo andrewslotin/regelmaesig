@@ -19,7 +19,7 @@ func stackWithMetrics(t *testing.T, upstream http.Handler, timeout time.Duration
 	upstreamSrv := httptest.NewServer(upstream)
 	reg = prometheus.NewRegistry()
 	m := NewMetrics(reg)
-	mux := newMux(upstreamSrv.URL, timeout, 0, 0, m)
+	mux := newMux(upstreamSrv.URL, timeout, 0, 0, m, nil)
 	srv := httptest.NewServer(mux)
 	return srv.URL, reg, func() {
 		srv.Close()
@@ -35,7 +35,7 @@ func unreachableStackWithMetrics(t *testing.T, timeout time.Duration) (srvURL st
 	stub.Close()
 	reg = prometheus.NewRegistry()
 	m := NewMetrics(reg)
-	mux := newMux(url, timeout, 0, 0, m)
+	mux := newMux(url, timeout, 0, 0, m, nil)
 	srv := httptest.NewServer(mux)
 	return srv.URL, reg, srv.Close
 }
@@ -96,9 +96,9 @@ func TestMetrics_UpstreamRequestsTotal_Success(t *testing.T) {
 	resp.Body.Close()    //nolint:errcheck
 
 	want := `
-		# HELP upstream_requests_total Total requests forwarded to upstream, by method, path pattern, and HTTP status.
+		# HELP upstream_requests_total Total requests forwarded to upstream, by upstream, method, path pattern, and HTTP status.
 		# TYPE upstream_requests_total counter
-		upstream_requests_total{method="GET",path="/lines",status="200"} 1
+		upstream_requests_total{method="GET",path="/lines",status="200",upstream="transport_rest"} 1
 	`
 	if err := testutil.GatherAndCompare(reg, strings.NewReader(want), "upstream_requests_total"); err != nil {
 		t.Error(err)
@@ -114,9 +114,9 @@ func TestMetrics_UpstreamRequestsTotal_UpstreamError(t *testing.T) {
 	resp.Body.Close()    //nolint:errcheck
 
 	want := `
-		# HELP upstream_requests_total Total requests forwarded to upstream, by method, path pattern, and HTTP status.
+		# HELP upstream_requests_total Total requests forwarded to upstream, by upstream, method, path pattern, and HTTP status.
 		# TYPE upstream_requests_total counter
-		upstream_requests_total{method="GET",path="/lines",status="500"} 1
+		upstream_requests_total{method="GET",path="/lines",status="500",upstream="transport_rest"} 1
 	`
 	if err := testutil.GatherAndCompare(reg, strings.NewReader(want), "upstream_requests_total"); err != nil {
 		t.Error(err)
@@ -176,9 +176,9 @@ func TestMetrics_UpstreamErrorsTotal_ConnectionRefused(t *testing.T) {
 	resp.Body.Close()    //nolint:errcheck
 
 	want := `
-		# HELP upstream_errors_total Upstream failures by method, path pattern, and reason (timeout, connection_refused, http_5xx, etc.).
+		# HELP upstream_errors_total Upstream failures by upstream, method, path pattern, and reason (timeout, connection_refused, http_5xx, etc.).
 		# TYPE upstream_errors_total counter
-		upstream_errors_total{method="GET",path="/lines",reason="connection_refused"} 1
+		upstream_errors_total{method="GET",path="/lines",reason="connection_refused",upstream="transport_rest"} 1
 	`
 	if err := testutil.GatherAndCompare(reg, strings.NewReader(want), "upstream_errors_total"); err != nil {
 		t.Error(err)
@@ -194,9 +194,9 @@ func TestMetrics_UpstreamErrorsTotal_Timeout(t *testing.T) {
 	resp.Body.Close()    //nolint:errcheck
 
 	want := `
-		# HELP upstream_errors_total Upstream failures by method, path pattern, and reason (timeout, connection_refused, http_5xx, etc.).
+		# HELP upstream_errors_total Upstream failures by upstream, method, path pattern, and reason (timeout, connection_refused, http_5xx, etc.).
 		# TYPE upstream_errors_total counter
-		upstream_errors_total{method="GET",path="/lines",reason="timeout"} 1
+		upstream_errors_total{method="GET",path="/lines",reason="timeout",upstream="transport_rest"} 1
 	`
 	if err := testutil.GatherAndCompare(reg, strings.NewReader(want), "upstream_errors_total"); err != nil {
 		t.Error(err)
@@ -212,9 +212,9 @@ func TestMetrics_UpstreamErrorsTotal_HTTP5xx(t *testing.T) {
 	resp.Body.Close()    //nolint:errcheck
 
 	want := `
-		# HELP upstream_errors_total Upstream failures by method, path pattern, and reason (timeout, connection_refused, http_5xx, etc.).
+		# HELP upstream_errors_total Upstream failures by upstream, method, path pattern, and reason (timeout, connection_refused, http_5xx, etc.).
 		# TYPE upstream_errors_total counter
-		upstream_errors_total{method="GET",path="/lines",reason="http_5xx"} 1
+		upstream_errors_total{method="GET",path="/lines",reason="http_5xx",upstream="transport_rest"} 1
 	`
 	if err := testutil.GatherAndCompare(reg, strings.NewReader(want), "upstream_errors_total"); err != nil {
 		t.Error(err)

@@ -4,10 +4,10 @@ import (
 	"net/http"
 )
 
-func handleStations(client *http.Client, upstream string, cache *Cache, metrics *Metrics) http.HandlerFunc {
-	return newStandardHandler(client, upstream, `{}`, cache, nil, metrics)
+func handleStations(providers []DataProvider, cache *Cache, metrics *Metrics) http.HandlerFunc {
+	return newStandardHandler(providers, `{}`, cache, nil, metrics)
 }
 
-func handleStation(client *http.Client, upstream string, cache *Cache, metrics *Metrics) http.HandlerFunc {
-	return newStandardHandler(client, upstream, `{}`, cache, nil, metrics)
+func handleStation(providers []DataProvider, cache *Cache, metrics *Metrics) http.HandlerFunc {
+	return newStandardHandler(providers, `{}`, cache, nil, metrics)
 }

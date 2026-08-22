@@ -4,10 +4,10 @@ import (
 	"net/http"
 )
 
-func handleLines(client *http.Client, upstream string, cache *Cache, metrics *Metrics) http.HandlerFunc {
-	return newStandardHandler(client, upstream, `[]`, cache, nil, metrics)
+func handleLines(providers []DataProvider, cache *Cache, metrics *Metrics) http.HandlerFunc {
+	return newStandardHandler(providers, `[]`, cache, nil, metrics)
 }
 
-func handleLine(client *http.Client, upstream string, cache *Cache, metrics *Metrics) http.HandlerFunc {
-	return newStandardHandler(client, upstream, `{}`, cache, nil, metrics)
+func handleLine(providers []DataProvider, cache *Cache, metrics *Metrics) http.HandlerFunc {
+	return newStandardHandler(providers, `{}`, cache, nil, metrics)
 }

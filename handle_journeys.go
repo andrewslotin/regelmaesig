@@ -4,10 +4,10 @@ import (
 	"net/http"
 )
 
-func handleJourneys(client *http.Client, upstream string, cache *Cache, metrics *Metrics) http.HandlerFunc {
-	return newStandardHandler(client, upstream, `{"journeys":[]}`, cache, journeysExpiry, metrics)
+func handleJourneys(providers []DataProvider, cache *Cache, metrics *Metrics) http.HandlerFunc {
+	return newStandardHandler(providers, `{"journeys":[]}`, cache, journeysExpiry, metrics)
 }
 
-func handleRefreshJourney(client *http.Client, upstream string, cache *Cache, metrics *Metrics) http.HandlerFunc {
-	return newStandardHandler(client, upstream, `{"journey":{}}`, cache, refreshJourneyExpiry, metrics)
+func handleRefreshJourney(providers []DataProvider, cache *Cache, metrics *Metrics) http.HandlerFunc {
+	return newStandardHandler(providers, `{"journey":{}}`, cache, refreshJourneyExpiry, metrics)
 }

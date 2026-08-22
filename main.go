@@ -16,6 +16,7 @@ const (
 	DefaultTimeout          = 10 * time.Second
 	DefaultStaticCacheSize  = 512
 	DefaultDynamicCacheSize = 2048
+	DefaultHAFASVersion     = "1.45"
 	upstreamURL             = "https://v6.vbb.transport.rest"
 )
 
@@ -39,10 +40,25 @@ func main() {
 
 	reg := prometheus.NewRegistry()
 	metrics := NewMetrics(reg)
-	mux := newMux(upstreamURL, config.Timeout, config.StaticCacheSize, config.DynamicCacheSize, metrics)
+
+	var hafas *HAFASClient
+	if endpoint, aid := os.Getenv("HAFAS_ENDPOINT"), os.Getenv("HAFAS_AUTH_AID"); endpoint != "" && aid != "" {
+		version := os.Getenv("HAFAS_VERSION")
+		if version == "" {
+			version = DefaultHAFASVersion
+		}
+		hafasClient := &http.Client{Timeout: config.Timeout}
+		hafas = NewHAFASClient(hafasClient, endpoint, aid, version)
+		slog.Info("HAFAS fallback enabled", "endpoint", endpoint)
+	} else {
+		slog.Info("HAFAS fallback disabled (set HAFAS_ENDPOINT and HAFAS_AUTH_AID to enable)")
+	}
+
+	mux := newMux(upstreamURL, config.Timeout, config.StaticCacheSize, config.DynamicCacheSize, metrics, hafas)
 
 	slog.Info("starting server", "listenAddr", config.ListenAddr, "timeout", config.Timeout,
-		"staticCacheSize", config.StaticCacheSize, "dynamicCacheSize", config.DynamicCacheSize)
+		"staticCacheSize", config.StaticCacheSize, "dynamicCacheSize", config.DynamicCacheSize,
+		"hafas", hafas != nil)
 	if err := http.ListenAndServe(config.ListenAddr, mux); err != nil {
 		slog.Error("failed to start server", "error", err)
 		os.Exit(1)

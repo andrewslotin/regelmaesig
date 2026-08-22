@@ -99,7 +99,7 @@ type compactUpstreamDeparture struct {
 // transforms the payload; the cache is used purely as a stale-if-error
 // fallback when every fetch fails — there is no "serve from cache while
 // fresh" fast path.
-func handleCompactDepartures(client *http.Client, upstream string, cache *Cache, metrics *Metrics) http.HandlerFunc {
+func handleCompactDepartures(client *http.Client, upstream string, cache *Cache, metrics *Metrics, hafas *HAFASClient) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		stops, ok := parseCompactStops(r.URL.Query().Get("stops"))
 		if !ok {
@@ -120,6 +120,9 @@ func handleCompactDepartures(client *http.Client, upstream string, cache *Cache,
 			go func(i int, id string) {
 				defer wg.Done()
 				board, updatedAt, err := fetchCompactBoard(r.Context(), client, upstream, id, duration, metrics)
+				if err != nil && hafas != nil {
+					board, updatedAt, err = fetchCompactBoardFromHAFAS(r.Context(), hafas, id, duration, metrics)
+				}
 				results[i] = compactFetchResult{board: board, realtimeDataUpdatedAt: updatedAt, err: err}
 			}(i, id)
 		}
@@ -206,17 +209,17 @@ func fetchCompactBoard(ctx context.Context, client *http.Client, upstream, id st
 	start := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
-		metrics.UpstreamErrorsTotal.WithLabelValues(http.MethodGet, compactRoutePath, errorReason(err)).Inc()
+		metrics.UpstreamErrorsTotal.WithLabelValues("transport_rest", http.MethodGet, compactRoutePath, errorReason(err)).Inc()
 		return nil, 0, err
 	}
 	defer resp.Body.Close() //nolint:errcheck
 
-	metrics.UpstreamRequestDuration.WithLabelValues(http.MethodGet, compactRoutePath).Observe(time.Since(start).Seconds())
-	metrics.UpstreamRequestsTotal.WithLabelValues(http.MethodGet, compactRoutePath, strconv.Itoa(resp.StatusCode)).Inc()
+	metrics.UpstreamRequestDuration.WithLabelValues("transport_rest", http.MethodGet, compactRoutePath).Observe(time.Since(start).Seconds())
+	metrics.UpstreamRequestsTotal.WithLabelValues("transport_rest", http.MethodGet, compactRoutePath, strconv.Itoa(resp.StatusCode)).Inc()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		io.Copy(io.Discard, resp.Body) //nolint:errcheck
-		metrics.UpstreamErrorsTotal.WithLabelValues(http.MethodGet, compactRoutePath, httpErrorReason(resp.StatusCode)).Inc()
+		metrics.UpstreamErrorsTotal.WithLabelValues("transport_rest", http.MethodGet, compactRoutePath, httpErrorReason(resp.StatusCode)).Inc()
 		return nil, 0, fmt.Errorf("upstream returned status %d", resp.StatusCode)
 	}
 
@@ -402,4 +405,101 @@ func writeCompactJSON(w http.ResponseWriter, status int, body []byte) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	w.Write(body) //nolint:errcheck
+}
+
+func fetchCompactBoardFromHAFAS(ctx context.Context, hafas *HAFASClient, id string, duration int, metrics *Metrics) (*compactBoard, int64, error) {
+	start := time.Now()
+	res, err := hafas.stationBoard(ctx, id, "DEP", duration)
+	if err != nil {
+		metrics.UpstreamErrorsTotal.WithLabelValues("hafas", http.MethodGet, compactRoutePath, errorReason(err)).Inc()
+		return nil, 0, err
+	}
+	metrics.UpstreamRequestDuration.WithLabelValues("hafas", http.MethodGet, compactRoutePath).Observe(time.Since(start).Seconds())
+	metrics.UpstreamRequestsTotal.WithLabelValues("hafas", http.MethodGet, compactRoutePath, "200").Inc()
+
+	return transformHAFASCompactBoard(id, res), hafasPlanrtTS(res.PlanrtTS), nil
+}
+
+func transformHAFASCompactBoard(id string, res *hafasStationBoardResult) *compactBoard {
+	board := &compactBoard{
+		ID:         id,
+		Name:       id,
+		Departures: []compactDeparture{},
+	}
+
+	cutoff := time.Now().Add(-compactPastGrace)
+	nameSet := false
+
+	for _, jny := range res.JnyL {
+		if jny.StbStop.LocX < 0 || jny.StbStop.LocX >= len(res.Common.LocL) {
+			continue
+		}
+		if jny.ProdX < 0 || jny.ProdX >= len(res.Common.ProdL) {
+			continue
+		}
+
+		loc := res.Common.LocL[jny.StbStop.LocX]
+		prod := res.Common.ProdL[jny.ProdX]
+
+		if !nameSet && loc.Name != "" {
+			board.Name = loc.Name
+			nameSet = true
+		}
+
+		tzOffset := loc.TZOffset
+		if tzOffset == 0 {
+			tzOffset = 120
+		}
+
+		plannedWhen := parseHAFASTime(jny.Date, jny.StbStop.DTimeS, tzOffset)
+		when := plannedWhen
+		if jny.StbStop.DTimeR != "" {
+			when = parseHAFASTime(jny.Date, jny.StbStop.DTimeR, tzOffset)
+		}
+
+		t := when
+		if t.IsZero() || t.Before(cutoff) {
+			continue
+		}
+
+		lineName := prod.NameS
+		if lineName == "" {
+			lineName = prod.Name
+		}
+		if lineName == "" {
+			lineName = "?"
+		}
+
+		delay := 0
+		if jny.StbStop.DTimeR != "" {
+			delaySec := when.Sub(plannedWhen).Seconds()
+			delay = int(math.Floor(delaySec/60.0 + 0.5))
+		}
+
+		cancelled := 0
+		if jny.StbStop.DCncl {
+			cancelled = 1
+		}
+
+		board.Departures = append(board.Departures, compactDeparture{
+			Line:      lineName,
+			Product:   hafasProductName(prod.Cls),
+			Direction: compactStripDirection(jny.DirTxt),
+			Time:      t.Unix(),
+			Delay:     delay,
+			Cancelled: cancelled,
+			Warning:   0,
+		})
+	}
+
+	slices.SortStableFunc(board.Departures, func(a, b compactDeparture) int {
+		return cmp.Compare(a.Time, b.Time)
+	})
+
+	return board
+}
+
+func hafasPlanrtTS(s string) int64 {
+	v, _ := strconv.ParseInt(s, 10, 64)
+	return v
 }
