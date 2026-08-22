@@ -4,10 +4,10 @@ import (
 	"net/http"
 )
 
-func handleTrips(client *http.Client, upstream string, cache *Cache, metrics *Metrics) http.HandlerFunc {
-	return newStandardHandler(client, upstream, `{"trips":[]}`, cache, tripsExpiry, metrics)
+func handleTrips(providers []DataProvider, cache *Cache, metrics *Metrics) http.HandlerFunc {
+	return newStandardHandler(providers, `{"trips":[]}`, cache, tripsExpiry, metrics)
 }
 
-func handleTrip(client *http.Client, upstream string, cache *Cache, metrics *Metrics) http.HandlerFunc {
-	return newStandardHandler(client, upstream, `{"trip":{}}`, cache, tripExpiry, metrics)
+func handleTrip(providers []DataProvider, cache *Cache, metrics *Metrics) http.HandlerFunc {
+	return newStandardHandler(providers, `{"trip":{}}`, cache, tripExpiry, metrics)
 }

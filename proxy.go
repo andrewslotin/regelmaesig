@@ -1,12 +1,50 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"time"
 )
+
+// DataProvider fetches data for r, returning the response body and headers on success.
+type DataProvider func(ctx context.Context, r *http.Request, metrics *Metrics) (body []byte, header http.Header, err error)
+
+// TransportRESTClient forwards requests to a transport.rest-compatible upstream.
+type TransportRESTClient struct {
+	Client   *http.Client
+	Upstream string
+}
+
+// Forward implements DataProvider by forwarding r to the upstream and recording metrics
+// with "transport_rest" as the upstream label.
+func (c *TransportRESTClient) Forward(ctx context.Context, r *http.Request, metrics *Metrics) ([]byte, http.Header, error) {
+	path := routePath(r)
+	start := time.Now()
+	resp, err := forward(c.Client, c.Upstream, r)
+	if err != nil {
+		metrics.UpstreamErrorsTotal.WithLabelValues("transport_rest", r.Method, path, errorReason(err)).Inc()
+		return nil, nil, err
+	}
+	defer resp.Body.Close() //nolint:errcheck
+
+	duration := time.Since(start)
+	metrics.UpstreamRequestDuration.WithLabelValues("transport_rest", r.Method, path).Observe(duration.Seconds())
+	metrics.UpstreamRequestsTotal.WithLabelValues("transport_rest", r.Method, path, strconv.Itoa(resp.StatusCode)).Inc()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		metrics.UpstreamErrorsTotal.WithLabelValues("transport_rest", r.Method, path, httpErrorReason(resp.StatusCode)).Inc()
+		return nil, nil, fmt.Errorf("upstream returned status %d", resp.StatusCode)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, nil, err
+	}
+	return body, resp.Header.Clone(), nil
+}
 
 // forward builds an upstream request from r, executes it with client, and returns the response.
 // The caller is responsible for closing the response body.
@@ -39,38 +77,30 @@ func writeEmptyJSON(w http.ResponseWriter, body string) {
 	io.WriteString(w, body) //nolint:errcheck
 }
 
-// newStandardHandler returns a handler that forwards to upstream, caches successful responses,
-// and falls back to a cached response (or empty JSON with X-Cache: MISS) on failure.
+// newStandardHandler returns a handler that fetches data from the first successful provider,
+// caches successful responses, and falls back to a cached response (or empty JSON with
+// X-Cache: MISS) if all providers fail.
 //
 // When expiry is nil the response is cached indefinitely (static routes).
 // When expiry is non-nil it is called with the buffered body; a zero return means "do not cache"
 // (e.g. an empty-array response).
-func newStandardHandler(client *http.Client, upstream, emptyBody string, cache *Cache, expiry func([]byte) time.Time, metrics *Metrics) http.HandlerFunc {
+func newStandardHandler(providers []DataProvider, emptyBody string, cache *Cache, expiry func([]byte) time.Time, metrics *Metrics) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		key := r.URL.RequestURI()
-		path := routePath(r)
 
-		start := time.Now()
-		resp, err := forward(client, upstream, r)
-		if err != nil {
-			metrics.UpstreamErrorsTotal.WithLabelValues(r.Method, path, errorReason(err)).Inc()
-			serveFallback(w, cache, key, emptyBody, metrics, r)
-			return
-		}
-		defer resp.Body.Close() //nolint:errcheck
-
-		duration := time.Since(start)
-		metrics.UpstreamRequestDuration.WithLabelValues(r.Method, path).Observe(duration.Seconds())
-		metrics.UpstreamRequestsTotal.WithLabelValues(r.Method, path, strconv.Itoa(resp.StatusCode)).Inc()
-
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			metrics.UpstreamErrorsTotal.WithLabelValues(r.Method, path, httpErrorReason(resp.StatusCode)).Inc()
-			serveFallback(w, cache, key, emptyBody, metrics, r)
-			return
+		var body []byte
+		var header http.Header
+		for _, p := range providers {
+			var err error
+			body, header, err = p(r.Context(), r, metrics)
+			if err == nil {
+				break
+			}
+			body = nil
+			header = nil
 		}
 
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
+		if body == nil {
 			serveFallback(w, cache, key, emptyBody, metrics, r)
 			return
 		}
@@ -82,19 +112,19 @@ func newStandardHandler(client *http.Client, upstream, emptyBody string, cache *
 		// Cache when: static route (expiry==nil), or dynamic with a future expiry time.
 		if expiry == nil || (!expiresAt.IsZero() && expiresAt.After(time.Now())) {
 			cache.Set(key, &cacheEntry{
-				statusCode: resp.StatusCode,
-				header:     resp.Header.Clone(),
+				statusCode: http.StatusOK,
+				header:     header,
 				body:       body,
 				expiresAt:  expiresAt,
 			})
 		}
 
-		for k, vs := range resp.Header {
+		for k, vs := range header {
 			for _, v := range vs {
 				w.Header().Add(k, v)
 			}
 		}
-		w.WriteHeader(resp.StatusCode)
+		w.WriteHeader(http.StatusOK)
 		w.Write(body) //nolint:errcheck
 	}
 }
@@ -108,7 +138,7 @@ func newPassthroughHandler(client *http.Client, upstream, emptyBody string, metr
 		start := time.Now()
 		resp, err := forward(client, upstream, r)
 		if err != nil {
-			metrics.UpstreamErrorsTotal.WithLabelValues(r.Method, path, errorReason(err)).Inc()
+			metrics.UpstreamErrorsTotal.WithLabelValues("transport_rest", r.Method, path, errorReason(err)).Inc()
 			metrics.FallbackResponsesTotal.WithLabelValues(r.Method, path).Inc()
 			writeEmptyJSON(w, emptyBody)
 			return
@@ -116,11 +146,11 @@ func newPassthroughHandler(client *http.Client, upstream, emptyBody string, metr
 		defer resp.Body.Close() //nolint:errcheck
 
 		duration := time.Since(start)
-		metrics.UpstreamRequestDuration.WithLabelValues(r.Method, path).Observe(duration.Seconds())
-		metrics.UpstreamRequestsTotal.WithLabelValues(r.Method, path, strconv.Itoa(resp.StatusCode)).Inc()
+		metrics.UpstreamRequestDuration.WithLabelValues("transport_rest", r.Method, path).Observe(duration.Seconds())
+		metrics.UpstreamRequestsTotal.WithLabelValues("transport_rest", r.Method, path, strconv.Itoa(resp.StatusCode)).Inc()
 
 		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			metrics.UpstreamErrorsTotal.WithLabelValues(r.Method, path, httpErrorReason(resp.StatusCode)).Inc()
+			metrics.UpstreamErrorsTotal.WithLabelValues("transport_rest", r.Method, path, httpErrorReason(resp.StatusCode)).Inc()
 			metrics.FallbackResponsesTotal.WithLabelValues(r.Method, path).Inc()
 			writeEmptyJSON(w, emptyBody)
 			return

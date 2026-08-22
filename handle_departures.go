@@ -4,6 +4,6 @@ import (
 	"net/http"
 )
 
-func handleDepartures(client *http.Client, upstream string, cache *Cache, metrics *Metrics) http.HandlerFunc {
-	return newStandardHandler(client, upstream, `{"departures":[]}`, cache, departuresExpiry, metrics)
+func handleDepartures(providers []DataProvider, cache *Cache, metrics *Metrics) http.HandlerFunc {
+	return newStandardHandler(providers, `{"departures":[]}`, cache, departuresExpiry, metrics)
 }

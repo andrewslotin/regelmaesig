@@ -15,15 +15,15 @@ func handleShape(client *http.Client, upstream string, cache *Cache, metrics *Me
 		start := time.Now()
 		resp, err := forward(client, upstream, r)
 		if err != nil {
-			metrics.UpstreamErrorsTotal.WithLabelValues(r.Method, path, errorReason(err)).Inc()
+			metrics.UpstreamErrorsTotal.WithLabelValues("transport_rest", r.Method, path, errorReason(err)).Inc()
 			serveFallback(w, cache, key, `{}`, metrics, r)
 			return
 		}
 		defer resp.Body.Close() //nolint:errcheck
 
 		duration := time.Since(start)
-		metrics.UpstreamRequestDuration.WithLabelValues(r.Method, path).Observe(duration.Seconds())
-		metrics.UpstreamRequestsTotal.WithLabelValues(r.Method, path, strconv.Itoa(resp.StatusCode)).Inc()
+		metrics.UpstreamRequestDuration.WithLabelValues("transport_rest", r.Method, path).Observe(duration.Seconds())
+		metrics.UpstreamRequestsTotal.WithLabelValues("transport_rest", r.Method, path, strconv.Itoa(resp.StatusCode)).Inc()
 
 		// Shapes return redirects (3xx); treat 2xx and 3xx as cacheable success.
 		if resp.StatusCode >= 200 && resp.StatusCode < 400 {
@@ -47,7 +47,7 @@ func handleShape(client *http.Client, upstream string, cache *Cache, metrics *Me
 			return
 		}
 
-		metrics.UpstreamErrorsTotal.WithLabelValues(r.Method, path, httpErrorReason(resp.StatusCode)).Inc()
+		metrics.UpstreamErrorsTotal.WithLabelValues("transport_rest", r.Method, path, httpErrorReason(resp.StatusCode)).Inc()
 		serveFallback(w, cache, key, `{}`, metrics, r)
 	}
 }
