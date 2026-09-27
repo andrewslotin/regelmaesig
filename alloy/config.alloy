@@ -1,0 +1,77 @@
+// Grafana Alloy config for regelmaesig.
+//
+// Scrapes the app's /metrics endpoint and forwards it to Grafana Cloud
+// Prometheus (remote_write), and receives OTLP traces from the app and
+// forwards them to Grafana Cloud Tempo (OTLP over HTTPS).
+//
+// Required environment variables (from the "Details" page of your Grafana
+// Cloud stack, under the Prometheus and Tempo panels respectively):
+//
+//   GRAFANA_CLOUD_PROM_URL   - Prometheus remote_write endpoint URL
+//                              (e.g. https://prometheus-prod-xx-xxxx.grafana.net/api/prom/push)
+//   GRAFANA_CLOUD_PROM_USER  - Prometheus instance ID (used as basic auth username)
+//   GRAFANA_CLOUD_TEMPO_URL  - Tempo OTLP base URL
+//                              (e.g. https://otlp-gateway-prod-xx-xxxx.grafana.net/otlp)
+//   GRAFANA_CLOUD_TEMPO_USER - Tempo instance ID (used as basic auth username)
+//   GRAFANA_CLOUD_API_KEY    - Grafana Cloud API token (used as basic auth
+//                              password for both Prometheus and Tempo)
+
+// --- Metrics: scrape the app and remote_write to Grafana Cloud Prometheus ---
+
+prometheus.scrape "regelmaesig" {
+	targets = [
+		{"__address__" = "regelmaesig:8080", "job" = "regelmaesig"},
+	]
+
+	forward_to      = [prometheus.remote_write.grafana_cloud.receiver]
+	scrape_interval = "15s"
+	job_name        = "regelmaesig"
+	metrics_path    = "/metrics"
+}
+
+prometheus.remote_write "grafana_cloud" {
+	endpoint {
+		url = sys.env("GRAFANA_CLOUD_PROM_URL")
+
+		basic_auth {
+			username = sys.env("GRAFANA_CLOUD_PROM_USER")
+			password = sys.env("GRAFANA_CLOUD_API_KEY")
+		}
+	}
+}
+
+// --- Traces: receive OTLP from the app and export to Grafana Cloud Tempo ---
+
+otelcol.receiver.otlp "app" {
+	grpc {
+		endpoint = "0.0.0.0:4317"
+	}
+
+	http {
+		endpoint = "0.0.0.0:4318"
+	}
+
+	output {
+		traces = [otelcol.processor.batch.default.input]
+	}
+}
+
+otelcol.processor.batch "default" {
+	output {
+		traces = [otelcol.exporter.otlphttp.grafana_cloud_tempo.input]
+	}
+}
+
+otelcol.auth.basic "grafana_cloud_tempo" {
+	client_auth {
+		username = sys.env("GRAFANA_CLOUD_TEMPO_USER")
+		password = sys.env("GRAFANA_CLOUD_API_KEY")
+	}
+}
+
+otelcol.exporter.otlphttp "grafana_cloud_tempo" {
+	client {
+		endpoint = sys.env("GRAFANA_CLOUD_TEMPO_URL")
+		auth     = otelcol.auth.basic.grafana_cloud_tempo.handler
+	}
+}

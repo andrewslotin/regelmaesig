@@ -7,10 +7,38 @@ import (
 	"net/http"
 	"strconv"
 	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
-// DataProvider fetches data for r, returning the response body and headers on success.
-type DataProvider func(ctx context.Context, r *http.Request, metrics *Metrics) (body []byte, header http.Header, err error)
+// DataProviderFunc fetches data for r, returning the response body and headers on success.
+type DataProviderFunc func(ctx context.Context, r *http.Request, metrics *Metrics) (body []byte, header http.Header, err error)
+
+// DataProvider pairs a DataProviderFunc with a Name used to label its span in traces.
+type DataProvider struct {
+	Name  string
+	Fetch DataProviderFunc
+}
+
+// getTracer returns the package tracer, resolved against the current global
+// TracerProvider on every call (rather than cached once at init) so that
+// swapping the global TracerProvider — as tests do — takes effect immediately.
+func getTracer() trace.Tracer {
+	return otel.Tracer("github.com/andrewslotin/regelmaesig")
+}
+
+// instrumentedHTTPClient returns an *http.Client with the given timeout whose transport
+// is wrapped for OTel HTTP client instrumentation.
+func instrumentedHTTPClient(timeout time.Duration) *http.Client {
+	base := http.DefaultTransport
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: otelhttp.NewTransport(base),
+	}
+}
 
 // TransportRESTClient forwards requests to a transport.rest-compatible upstream.
 type TransportRESTClient struct {
@@ -18,12 +46,15 @@ type TransportRESTClient struct {
 	Upstream string
 }
 
-// Forward implements DataProvider by forwarding r to the upstream and recording metrics
+// Forward implements DataProviderFunc by forwarding r to the upstream and recording metrics
 // with "transport_rest" as the upstream label.
 func (c *TransportRESTClient) Forward(ctx context.Context, r *http.Request, metrics *Metrics) ([]byte, http.Header, error) {
 	path := routePath(r)
 	start := time.Now()
-	resp, err := forward(c.Client, c.Upstream, r)
+	// Build the outbound request from a shallow copy of r carrying ctx (which holds the
+	// provider span from callProvider), not r's own context, so the instrumented client
+	// transport nests its HTTP span under the provider span rather than under the server span.
+	resp, err := forward(c.Client, c.Upstream, r.WithContext(ctx))
 	if err != nil {
 		metrics.UpstreamErrorsTotal.WithLabelValues("transport_rest", r.Method, path, errorReason(err)).Inc()
 		return nil, nil, err
@@ -47,6 +78,9 @@ func (c *TransportRESTClient) Forward(ctx context.Context, r *http.Request, metr
 }
 
 // forward builds an upstream request from r, executes it with client, and returns the response.
+// The outbound request is built with r.Context(), so callers that need the request to carry a
+// specific context (e.g. one holding a provider span, so the instrumented client transport
+// creates its HTTP span as that span's child) must pass r.WithContext(ctx) rather than r itself.
 // The caller is responsible for closing the response body.
 func forward(client *http.Client, upstream string, r *http.Request) (*http.Response, error) {
 	url := upstream + r.URL.RequestURI()
@@ -92,7 +126,7 @@ func newStandardHandler(providers []DataProvider, emptyBody string, cache *Cache
 		var header http.Header
 		for _, p := range providers {
 			var err error
-			body, header, err = p(r.Context(), r, metrics)
+			body, header, err = callProvider(r.Context(), p, r, metrics)
 			if err == nil {
 				break
 			}
@@ -127,6 +161,37 @@ func newStandardHandler(providers []DataProvider, emptyBody string, cache *Cache
 		w.WriteHeader(http.StatusOK)
 		w.Write(body) //nolint:errcheck
 	}
+}
+
+// callProvider invokes p.Fetch inside a span named "provider.<p.Name>", recording the
+// error (if any) on the span.
+func callProvider(ctx context.Context, p DataProvider, r *http.Request, metrics *Metrics) ([]byte, http.Header, error) {
+	ctx, span := getTracer().Start(ctx, "provider."+p.Name)
+	defer span.End()
+
+	body, header, err := p.Fetch(ctx, r, metrics)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+	return body, header, err
+}
+
+// callProviderRaw wraps fn in a span named "provider.<name>", recording any error fn
+// returns. Unlike callProvider, fn is not constrained to the DataProviderFunc signature:
+// it receives the span-carrying ctx and returns only an error, so callers with a
+// different fetch signature (e.g. the compact-departures fan-out) can still get a
+// provider span that parents the outbound HTTP client span.
+func callProviderRaw(ctx context.Context, name string, fn func(ctx context.Context) error) error {
+	ctx, span := getTracer().Start(ctx, "provider."+name)
+	defer span.End()
+
+	err := fn(ctx)
+	if err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+	}
+	return err
 }
 
 // newPassthroughHandler returns a handler that forwards to upstream and falls back to
@@ -176,6 +241,9 @@ func writeFromCache(w http.ResponseWriter, entry *cacheEntry) {
 // with X-Cache: MISS when no cached entry is available. It increments fallback_responses_total
 // only when no cached data is available.
 func serveFallback(w http.ResponseWriter, cache *Cache, key, emptyBody string, metrics *Metrics, r *http.Request) {
+	_, span := getTracer().Start(r.Context(), "fallback")
+	defer span.End()
+
 	if entry, ok := cache.Get(key); ok {
 		writeFromCache(w, entry)
 		return

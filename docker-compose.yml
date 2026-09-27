@@ -1,0 +1,38 @@
+# Runs regelmaesig alongside Grafana Alloy, which scrapes /metrics and
+# receives OTLP traces from the app, forwarding both to Grafana Cloud.
+#
+# Required environment variables (see .env.example):
+#   GRAFANA_CLOUD_PROM_URL, GRAFANA_CLOUD_PROM_USER,
+#   GRAFANA_CLOUD_TEMPO_URL, GRAFANA_CLOUD_TEMPO_USER, GRAFANA_CLOUD_API_KEY
+#
+# Optional: HAFAS_ENDPOINT, HAFAS_AUTH_AID, HAFAS_VERSION
+
+services:
+  regelmaesig:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://alloy:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+      OTEL_SERVICE_NAME: ${OTEL_SERVICE_NAME:-regelmaesig}
+      OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-1.0}
+      HAFAS_ENDPOINT: ${HAFAS_ENDPOINT:-}
+      HAFAS_AUTH_AID: ${HAFAS_AUTH_AID:-}
+      HAFAS_VERSION: ${HAFAS_VERSION:-}
+    depends_on:
+      - alloy
+
+  alloy:
+    image: grafana/alloy:latest
+    volumes:
+      - ./alloy/config.alloy:/etc/alloy/config.alloy:ro
+    command: run /etc/alloy/config.alloy --server.http.listen-addr=0.0.0.0:12345
+    ports:
+      - "12345:12345"
+    environment:
+      GRAFANA_CLOUD_PROM_URL: ${GRAFANA_CLOUD_PROM_URL}
+      GRAFANA_CLOUD_PROM_USER: ${GRAFANA_CLOUD_PROM_USER}
+      GRAFANA_CLOUD_TEMPO_URL: ${GRAFANA_CLOUD_TEMPO_URL}
+      GRAFANA_CLOUD_TEMPO_USER: ${GRAFANA_CLOUD_TEMPO_USER}
+      GRAFANA_CLOUD_API_KEY: ${GRAFANA_CLOUD_API_KEY}

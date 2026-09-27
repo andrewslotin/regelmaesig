@@ -124,3 +124,20 @@ then `limit` is applied.
 
 On upstream failure the endpoint serves the last known good response until its
 final departure has passed. `GET /healthz` returns `200 ok`.
+
+Observability
+-------------
+
+Metrics are exposed on `GET /metrics` (Prometheus format). Traces are emitted
+via OpenTelemetry OTLP/gRPC, configured through the standard `OTEL_EXPORTER_OTLP_*`
+environment variables.
+
+[Grafana Alloy](https://grafana.com/docs/alloy/latest/) ships alongside the app
+to scrape `/metrics` and receive OTLP traces on `:4317`, forwarding both to
+Grafana Cloud (Prometheus remote_write and Tempo). See `alloy/config.alloy`
+for the pipeline and `.env.example` for the required Grafana Cloud credentials.
+
+```bash
+cp .env.example .env   # fill in your Grafana Cloud details
+docker compose up
+```
