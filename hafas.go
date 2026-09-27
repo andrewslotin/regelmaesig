@@ -153,7 +153,7 @@ type hafasLocGeoPosResult struct {
 
 func (c *HAFASClient) do(ctx context.Context, method string, req interface{}) (*hafasSvcResult, error) {
 	body, err := json.Marshal(hafasRequest{
-		Lang: "en",
+		Lang:    "en",
 		SvcReqL: []hafasSvcRequest{{Meth: method, Req: req}},
 		Client: hafasClientID{
 			Type: "WEB",

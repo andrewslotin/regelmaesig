@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -38,6 +43,28 @@ func main() {
 		config.ListenAddr = DefaultListenAddr
 	}
 
+	if err := run(); err != nil {
+		slog.Error("fatal error", "error", err)
+		os.Exit(1)
+	}
+}
+
+// run wires up tracing, HTTP server, and signal-driven shutdown. It returns a
+// non-nil error only when the process should exit non-zero; in all cases its
+// deferred tracing shutdown runs before returning so buffered spans are flushed.
+func run() error {
+	tracingShutdown, err := setupTracing(context.Background())
+	if err != nil {
+		return fmt.Errorf("set up tracing: %w", err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := tracingShutdown(ctx); err != nil {
+			slog.Error("failed to shut down tracing", "error", err)
+		}
+	}()
+
 	reg := prometheus.NewRegistry()
 	metrics := NewMetrics(reg)
 
@@ -47,7 +74,7 @@ func main() {
 		if version == "" {
 			version = DefaultHAFASVersion
 		}
-		hafasClient := &http.Client{Timeout: config.Timeout}
+		hafasClient := instrumentedHTTPClient(config.Timeout)
 		hafas = NewHAFASClient(hafasClient, endpoint, aid, version)
 		slog.Info("HAFAS fallback enabled", "endpoint", endpoint)
 	} else {
@@ -56,12 +83,40 @@ func main() {
 
 	mux := newMux(upstreamURL, config.Timeout, config.StaticCacheSize, config.DynamicCacheSize, metrics, hafas)
 
-	slog.Info("starting server", "listenAddr", config.ListenAddr, "timeout", config.Timeout,
-		"staticCacheSize", config.StaticCacheSize, "dynamicCacheSize", config.DynamicCacheSize,
-		"hafas", hafas != nil)
-	if err := http.ListenAndServe(config.ListenAddr, mux); err != nil {
-		slog.Error("failed to start server", "error", err)
-		os.Exit(1)
+	srv := &http.Server{
+		Addr:    config.ListenAddr,
+		Handler: mux,
+	}
+
+	serveErr := make(chan error, 1)
+	go func() {
+		slog.Info("starting server", "listenAddr", config.ListenAddr, "timeout", config.Timeout,
+			"staticCacheSize", config.StaticCacheSize, "dynamicCacheSize", config.DynamicCacheSize,
+			"hafas", hafas != nil)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErr <- err
+			return
+		}
+		serveErr <- nil
+	}()
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	select {
+	case <-ctx.Done():
+		slog.Info("shutdown signal received, stopping server")
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			return fmt.Errorf("server shutdown: %w", err)
+		}
+		return nil
+	case err := <-serveErr:
+		if err != nil {
+			return fmt.Errorf("server: %w", err)
+		}
+		return nil
 	}
 }
 

@@ -111,22 +111,38 @@ func handleCompactDepartures(client *http.Client, upstream string, cache *Cache,
 
 		key := compactCacheKey(stops, duration, limit)
 
+		// Parent span grouping the per-stop provider spans below, so a trace shows
+		// one fan-out with N provider children rather than N unrelated root spans.
+		fanoutCtx, fanoutSpan := getTracer().Start(r.Context(), "compact.fanout")
+
 		// One goroutine per requested stop, each writing only to its own
 		// index of results — no mutex needed since indices never overlap.
+		// fanoutCtx is captured once here, before any goroutine starts, and never
+		// mutated afterward, so concurrent reads of it from the goroutines below are safe.
 		results := make([]compactFetchResult, len(stops))
 		var wg sync.WaitGroup
 		wg.Add(len(stops))
 		for i, id := range stops {
 			go func(i int, id string) {
 				defer wg.Done()
-				board, updatedAt, err := fetchCompactBoard(r.Context(), client, upstream, id, duration, metrics)
+				var board *compactBoard
+				var updatedAt int64
+				var err error
+				_ = callProviderRaw(fanoutCtx, "transport_rest", func(ctx context.Context) error {
+					board, updatedAt, err = fetchCompactBoard(ctx, client, upstream, id, duration, metrics)
+					return err
+				})
 				if err != nil && hafas != nil {
-					board, updatedAt, err = fetchCompactBoardFromHAFAS(r.Context(), hafas, id, duration, metrics)
+					_ = callProviderRaw(fanoutCtx, "hafas", func(ctx context.Context) error {
+						board, updatedAt, err = fetchCompactBoardFromHAFAS(ctx, hafas, id, duration, metrics)
+						return err
+					})
 				}
 				results[i] = compactFetchResult{board: board, realtimeDataUpdatedAt: updatedAt, err: err}
 			}(i, id)
 		}
 		wg.Wait()
+		fanoutSpan.End()
 
 		boards := make([]compactBoard, 0, len(stops))
 		var asOf int64
